@@ -2309,7 +2309,11 @@ function audioInit() {
   const lim = C.createDynamicsCompressor(); lim.threshold.value = -4; lim.knee.value = 0; lim.ratio.value = 20; lim.attack.value = .001; lim.release.value = .1;
   const out = C.createGain(); out.gain.value = .8; comp.connect(lim).connect(out).connect(C.destination);
   AU.master = C.createGain(); AU.master.gain.value = SET.muted ? 0 : 1; AU.master.connect(comp);
-  AU.music = C.createGain(); AU.music.gain.value = 0; AU.music.connect(AU.master);
+  AU.music = C.createGain(); AU.music.gain.value = 0;
+  { const lp = C.createBiquadFilter(), hp = C.createBiquadFilter(), mc = C.createDynamicsCompressor(), mg = C.createGain();
+    lp.type = 'lowpass'; lp.frequency.value = 7000; lp.Q.value = .5; hp.type = 'highpass'; hp.frequency.value = 35;
+    mc.threshold.value = -16; mc.ratio.value = 3; mc.attack.value = .01; mc.release.value = .3;
+    AU.musicOut = mg; mg.gain.value = SET.muted ? 0 : .9; AU.music.connect(hp).connect(lp).connect(mc).connect(mg).connect(C.destination); }
   AU.sfx = C.createGain(); AU.sfx.gain.value = SET.sfx ? 1 : 0; AU.sfx.connect(AU.master);
   const nb = C.createBuffer(1, C.sampleRate * 2, C.sampleRate), nd = nb.getChannelData(0);
   for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
@@ -2335,7 +2339,7 @@ function audioInit() {
   AU.rbG = gain(0); loopNoise().connect(filt('lowpass', 160, 1)).connect(AU.rbG).connect(AU.sfx);
   AU.wdG = gain(0); loopNoise().connect(filt('lowpass', 650, .7)).connect(AU.wdG).connect(AU.sfx);
   // 배경음악용 딜레이
-  AU.delay = C.createDelay(1); AU.delay.delayTime.value = STEP * 3; const fb = gain(.32);
+  AU.delay = C.createDelay(1); AU.delay.delayTime.value = STEP * 3; const fb = gain(.25);
   AU.delay.connect(fb).connect(AU.delay); AU.delay.connect(AU.music);
   AU.step = 0; AU.nextT = C.currentTime + .1;
   setInterval(musicTick, 25);
@@ -2398,40 +2402,38 @@ function playStep(n, t) {
   if (kicks.includes(s)) {
     const o = node('sine', 150), g = gn(); o.frequency.setValueAtTime(160, t); o.frequency.exponentialRampToValueAtTime(42, t + .3);
     o.connect(g).connect(out); env(g, t, .004, .9, .34); o.start(t); o.stop(t + .4);
-    // 808: 일그러뜨린 사인으로 노트북 스피커에서도 들리게
-    const b = node('sine', mtof(ch.r)), bg = gn(), sh = C.createWaveShaper(), cv = new Float32Array(256);
-    for (let i = 0; i < 256; i++) cv[i] = Math.tanh((i / 128 - 1) * 2.5);
-    sh.curve = cv; b.connect(sh).connect(bg).connect(out);
-    const next = kicks.find(k => k > s); const dur = ((next ?? 16) - s) * STEP;
-    env(bg, t, .01, .32, Math.max(.15, dur - .02)); b.start(t); b.stop(t + dur + .05);
+    // 808: 깨끗한 사인 + 한 옥타브 위 삼각파를 살짝 섞어 작은 스피커에서도 들리게 (일그러뜨리지 않음)
+    const next = kicks.find(k => k > s), dur = ((next ?? 16) - s) * STEP;
+    [['sine', 1, .3], ['triangle', 2, .06]].forEach(([type, mul, vol]) => {
+      const b = node(type, mtof(ch.r) * mul), bg = gn(); b.connect(bg).connect(out);
+      env(bg, t, .012, vol, Math.max(.15, dur - .03)); b.start(t); b.stop(t + dur + .05);
+    });
   }
-  if (s === 8 || (bar % 4 === 3 && s === 15)) {                         // 클랩
-    for (let i = 0; i < 3; i++) {
-      const src = C.createBufferSource(), bp = C.createBiquadFilter(), g = gn(), tt = t + i * .012;
-      src.buffer = AU.noise; bp.type = 'bandpass'; bp.frequency.value = 1500; bp.Q.value = .9;
-      src.connect(bp).connect(g).connect(out); env(g, tt, .002, s === 8 ? .38 : .15, i === 2 ? .16 : .02); src.start(tt, Math.random()); src.stop(tt + .2);
-    }
+  if (s === 8 || (bar % 4 === 3 && s === 15)) {                         // 스네어: 음정 있는 몸통 + 아주 작은 잡음
+    const o = node('triangle', 210), g = gn(); o.frequency.setValueAtTime(230, t); o.frequency.exponentialRampToValueAtTime(140, t + .12);
+    o.connect(g).connect(out); env(g, t, .002, s === 8 ? .28 : .12, .14); o.start(t); o.stop(t + .2);
+    const src = C.createBufferSource(), bp = C.createBiquadFilter(), ng = gn();
+    src.buffer = AU.noise; bp.type = 'bandpass'; bp.frequency.value = 2200; bp.Q.value = 1.2;
+    src.connect(bp).connect(ng).connect(out); env(ng, t, .002, s === 8 ? .06 : .025, .09); src.start(t, Math.random()); src.stop(t + .15);
   }
-  const roll = bar % 4 === 3 && s >= 12;
-  const hats = roll ? [0, STEP / 3, STEP * 2 / 3] : s % 2 === 0 ? [0] : [];
-  hats.forEach(o => {
-    const src = C.createBufferSource(), hp = C.createBiquadFilter(), g = gn(), tt = t + o, open = bar % 2 === 1 && s === 14;
-    src.buffer = AU.noise; hp.type = 'highpass'; hp.frequency.value = 7500;
-    src.connect(hp).connect(g).connect(out); env(g, tt, .002, open ? .09 : .06, open ? .22 : .035); src.start(tt, Math.random()); src.stop(tt + .3);
-  });
+  if (s % 4 === 2) {                                                   // 셰이커: 박자 사이에만 아주 작게
+    const src = C.createBufferSource(), bp = C.createBiquadFilter(), g = gn();
+    src.buffer = AU.noise; bp.type = 'bandpass'; bp.frequency.value = 5500; bp.Q.value = 1.5;
+    src.connect(bp).connect(g).connect(out); env(g, t, .004, .018, .03); src.start(t, Math.random()); src.stop(t + .08);
+  }
   if (s === 0) {                                                       // 패드
     ch.n.forEach(m => [-7, 7].forEach(det => {
       const o = node('sawtooth', mtof(m)), lp = C.createBiquadFilter(), g = gn(); o.detune.value = det;
-      lp.type = 'lowpass'; lp.frequency.value = 900; o.connect(lp).connect(g).connect(out);
+      lp.type = 'lowpass'; lp.frequency.value = 700; o.connect(lp).connect(g).connect(out);
       g.gain.setValueAtTime(.0001, t); g.gain.exponentialRampToValueAtTime(.022, t + .35); g.gain.setValueAtTime(.022, t + STEP * 14); g.gain.exponentialRampToValueAtTime(.0001, t + STEP * 16);
       o.start(t); o.stop(t + STEP * 16 + .05);
     }));
   }
   if (bar >= 4 && s % 2 === 0) {                                        // 아르페지오 (뒤 4마디)
     const seq = [0, 1, 2, 1, 2, 0, 1, 2], m = ch.n[seq[s / 2 % 8]] + 12;
-    const o = node('square', mtof(m)), lp = C.createBiquadFilter(), g = gn();
-    lp.type = 'lowpass'; lp.frequency.setValueAtTime(3200, t); lp.frequency.exponentialRampToValueAtTime(500, t + .2);
-    o.connect(lp).connect(g); g.connect(out); g.connect(AU.delay); env(g, t, .004, .07, .22); o.start(t); o.stop(t + .3);
+    const o = node('triangle', mtof(m)), lp = C.createBiquadFilter(), g = gn();
+    lp.type = 'lowpass'; lp.frequency.setValueAtTime(2600, t); lp.frequency.exponentialRampToValueAtTime(600, t + .2);
+    o.connect(lp).connect(g); g.connect(out); g.connect(AU.delay); env(g, t, .004, .09, .22); o.start(t); o.stop(t + .3);
   }
 }
 function setMusic() {
@@ -2441,6 +2443,7 @@ function setMusic() {
   AU.music.gain.setTargetAtTime(on ? vol : 0, AU.ctx.currentTime, .3);
   AU.sfx.gain.setTargetAtTime(SET.sfx ? 1 : 0, AU.ctx.currentTime, .05);
   AU.master.gain.setTargetAtTime(SET.muted ? 0 : 1, AU.ctx.currentTime, .05);
+  AU.musicOut.gain.setTargetAtTime(SET.muted ? 0 : .9, AU.ctx.currentTime, .05);
 }
 
 // ---------- 화면 갱신 ----------
@@ -3031,7 +3034,7 @@ addEventListener('resize', () => {
 
 if (new URLSearchParams(location.search).has('debug')) window.G = { V, S, E, input, step, reset, respawn, H, selectTrack, startGame, toMenu, applyNight, gate,
   get T() { return T; }, get CR() { return CR; }, get ghost() { return ghost; },
-  camera, car, freeCam:false, backfire, RACE, NET, openOnline, joinGame,
+  camera, car, freeCam:false, backfire, RACE, NET, openOnline, joinGame, AU,
   render(ms = 16) { const now = performance.now(); if (S.mode === 'play') { updateEngine(ms / 1000); updateCrowd(ms / 1000, now); updateVisuals(ms / 1000, now); updateBackfire(ms / 1000, now); draw(scene); }
     else { updateGarageCam(ms / 1000, now); draw(garage); }
     audioUpdate(ms / 1000); return AU.ctx ? AU.ctx.state : 'no-audio'; } };
