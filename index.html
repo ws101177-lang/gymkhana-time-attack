@@ -114,6 +114,9 @@
   .players { list-style:none; padding:0; margin:10px 0; display:grid; grid-template-columns:1fr 1fr; gap:6px; }
   .players li { display:flex; align-items:center; gap:8px; background:rgba(255,255,255,.06); border-radius:8px; padding:7px 10px; font-weight:700; font-size:14px; }
   .players li i { width:12px; height:12px; border-radius:50%; }
+  .olColors { display:flex; flex-wrap:wrap; gap:7px; margin:0 0 12px; }
+  .olColors button { width:28px; height:28px; border-radius:50%; border:2px solid rgba(255,255,255,.25); cursor:pointer; padding:0; }
+  .olColors button.on { border-color:#fff; outline:2px solid var(--red); outline-offset:2px; }
   .players li em { font-style:normal; font-size:10px; background:var(--red); padding:1px 5px; border-radius:3px; }
   /* ---------- 주행 화면 (F1 중계 그래픽 느낌) ---------- */
   #hud { pointer-events:none; }
@@ -330,6 +333,8 @@
       <h2 id="olRoomName" style="margin:6px 0 2px"></h2>
       <p class="detail">방 코드 <b id="olCode"></b> · <button class="link" id="olCopy" style="margin:0">초대 링크 복사</button></p>
       <ul id="olPlayers" class="players"></ul>
+      <div class="detail" style="margin:0 0 4px">내 차 색상</div>
+      <div class="olColors" id="olColors"></div>
       <div class="btnRow"><button class="primary" id="olStart">START (방장)</button><button class="secondary" id="olLeave">나가기</button></div>
       <p class="tiny" id="olStatus"></p>
     </div>
@@ -2214,6 +2219,13 @@ function drawMini(now) {
   { const g = gate(0), [u, v] = toMini(g.x, g.z); c.save(); c.translate(u, v); c.rotate(Math.atan2(g.tz, g.tx)); c.fillStyle = '#fff'; c.fillRect(-1.5, -7, 3, 14);
     c.fillStyle = '#111'; c.fillRect(-1.5, -7, 3, 3.5); c.fillRect(-1.5, 0, 3, 3.5); c.restore(); }
   for (const k of CONE) { const [u, v] = toMini(k.x, k.z); c.fillStyle = k.hit ? '#ff5a5a' : k.c === 'y' ? '#f2c21b' : k.c === 'o' ? '#ff6a1a' : '#fff'; c.fillRect(u - 1, v - 1, 2, 2); }
+  // 다른 차: 각자 도색 색깔 점(흰 테두리). 온라인 사람은 닉네임도 표시
+  c.font = '700 10px "Titillium Web", Arial'; c.textBaseline = 'middle';
+  for (const o of RACE.opps) {
+    const [u, v] = toMini(o.x, o.z);
+    c.fillStyle = o.color; c.strokeStyle = '#fff'; c.lineWidth = 1.4; c.beginPath(); c.arc(u, v, T.road ? 4.6 : 3.6, 0, 7); c.fill(); c.stroke();
+    if (o.remote) { c.lineWidth = 3; c.strokeStyle = 'rgba(0,0,0,.7)'; c.strokeText(o.name, u + 7, v); c.fillStyle = '#fff'; c.fillText(o.name, u + 7, v); }
+  }
   if (ghostCar.g.visible) { const [u, v] = toMini(ghostCar.g.position.x, ghostCar.g.position.z); c.fillStyle = '#8fdcff'; c.beginPath(); c.arc(u, v, 3.2, 0, 7); c.fill(); }
   const [u, v] = toMini(V.x, V.z), hx = Math.sin(V.h), hz = Math.cos(V.h), r = T.road ? 8 : 6.5;
   c.fillStyle = '#e10600'; c.strokeStyle = '#fff'; c.lineWidth = 1.5; c.beginPath();
@@ -2318,7 +2330,6 @@ function audioInit() {
   const nb = C.createBuffer(1, C.sampleRate * 2, C.sampleRate), nd = nb.getChannelData(0);
   for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
   AU.noise = nb;
-  const loopNoise = () => { const s = C.createBufferSource(); s.buffer = nb; s.loop = true; s.start(); return s; };
   const filt = (type, f, q = 1) => { const b = C.createBiquadFilter(); b.type = type; b.frequency.value = f; b.Q.value = q; return b; };
   const gain = v => { const g = C.createGain(); g.gain.value = v; return g; };
   // 엔진: 톱니파 2개 + 사각파(반 옥타브 아래) → 일그러뜨림 → 저역 통과
@@ -2330,14 +2341,11 @@ function audioInit() {
     const o = C.createOscillator(); o.type = type; o.detune.value = det; const og = gain(g); o.connect(og).connect(ws); o.start(); return { o, mul };
   });
   ws.connect(AU.eLP).connect(AU.eG).connect(AU.sfx);
-  // 관중: 넓은 대역 웅성거림 + 높은 함성 덩어리 (가까울수록 크게)
-  AU.crowdG = gain(0); AU.crowdG.connect(AU.sfx);
-  loopNoise().connect(filt('bandpass', 850, .7)).connect(gain(.9)).connect(AU.crowdG);
-  AU.cheerG = gain(0); loopNoise().connect(filt('bandpass', 2300, 2.5)).connect(AU.cheerG).connect(AU.crowdG);
-  // 타이어 비명, 잔디 덜컹거림, 바람
-  AU.sqG = gain(0); loopNoise().connect(filt('bandpass', 1650, 9)).connect(AU.sqG).connect(AU.sfx);
-  AU.rbG = gain(0); loopNoise().connect(filt('lowpass', 160, 1)).connect(AU.rbG).connect(AU.sfx);
-  AU.wdG = gain(0); loopNoise().connect(filt('lowpass', 650, .7)).connect(AU.wdG).connect(AU.sfx);
+  // 잡음(쉬익 소리)을 쓰는 소리는 모두 뺌. 타이어 비명은 떨리는 톱니파 두 개로 만든 맑은 음
+  AU.sqG = gain(0); AU.sqG.connect(AU.sfx);
+  { const bp = filt('bandpass', 1300, 4); bp.connect(AU.sqG);
+    [1080, 1155].forEach(f => { const o = C.createOscillator(), l = C.createOscillator(), lg = gain(35); o.type = 'sawtooth'; o.frequency.value = f; l.frequency.value = 7;
+      l.connect(lg).connect(o.detune); o.connect(gain(.2)).connect(bp); o.start(); l.start(); }); }
   // 배경음악용 딜레이
   AU.delay = C.createDelay(1); AU.delay.delayTime.value = STEP * 3; const fb = gain(.25);
   AU.delay.connect(fb).connect(AU.delay); AU.delay.connect(AU.music);
@@ -2352,23 +2360,33 @@ const sfx = {
     o.type = type; o.frequency.value = f; o.connect(g).connect(AU.sfx); env(g, t, .008, vol, dur); o.start(t); o.stop(t + dur + .05);
   },
   beep() { sfx.tone(880, .32, 'square', .12); sfx.tone(880, .32, 'sine', .25); },     // 빨간불 하나 켜질 때
-  go() { sfx.tone(1320, .55, 'square', .1); sfx.tone(1320, .55, 'sine', .28); sfx.whoosh(); },
+  go() { sfx.tone(1320, .55, 'square', .1); sfx.tone(1320, .55, 'sine', .28); },
   noise(dur, type, f, vol, q = 1, t0 = 0) {
     if (!AU.ctx) return; const C = AU.ctx, t = C.currentTime + t0, s = C.createBufferSource(), b = C.createBiquadFilter(), g = C.createGain();
     s.buffer = AU.noise; b.type = type; b.frequency.value = f; b.Q.value = q; s.connect(b).connect(g).connect(AU.sfx); env(g, t, .005, vol, dur); s.start(t, Math.random()); s.stop(t + dur + .05);
   },
-  whoosh() { sfx.noise(.6, 'bandpass', 900, .25, .8); },
-  cone() { sfx.tone(260, .12, 'triangle', .35); sfx.noise(.08, 'lowpass', 1200, .4); },
-  shift() { sfx.noise(.05, 'highpass', 2500, .12); },
-  crash(v) { sfx.noise(.25, 'lowpass', 700, .9 * v + .2, 1); sfx.tone(62, .2, 'sine', .7 * v + .2); sfx.noise(.12, 'bandpass', 2600, .3 * v, 3, .02); },
-  scrape() { sfx.noise(.12, 'bandpass', rand(2800, 4200), .14, 4); },
-  pop() {                                                              // 백파이어: 낮은 '펑' + 찢어지는 잡음 + 짧은 딱딱거림
-    sfx.tone(rand(55, 90), .1, 'sine', .55); sfx.noise(.09, 'lowpass', rand(900, 1700), .7, 1.2);
-    for (let i = 0; i < 3; i++) sfx.noise(.015, 'bandpass', rand(2500, 4500), .25, 2, rand(.02, .09));
+  cone() { sfx.tone(260, .12, 'triangle', .35); sfx.tone(520, .06, 'triangle', .12); },
+  shift() { sfx.tone(140, .05, 'triangle', .1); },
+  crash(v) { sfx.tone(62, .22, 'sine', .7 * v + .2); sfx.tone(118, .14, 'triangle', .3 * v + .1); },
+  scrape() {},
+  pop() {                                                              // 백파이어: 낮은 '펑' 두 겹 + 짧은 '탁'
+    sfx.tone(rand(55, 90), .1, 'sine', .55); sfx.tone(rand(150, 200), .05, 'triangle', .25);
+    for (let i = 0; i < 2; i++) sfx.tone(rand(300, 420), .02, 'triangle', .12, rand(.02, .08));
   },
-  cheer() { if (!AU.ctx) return; for (let i = 0; i < 3; i++) { const t0 = rand(0, 1.2), f = rand(1900, 2500), C = AU.ctx, t = C.currentTime + t0, o = C.createOscillator(), g = C.createGain();
-    o.frequency.setValueAtTime(f, t); o.frequency.linearRampToValueAtTime(f * 1.25, t + .25); o.frequency.linearRampToValueAtTime(f * .9, t + .4);
-    o.connect(g).connect(AU.sfx); env(g, t, .02, .05, .4); o.start(t); o.stop(t + .5); } },
+  // 관중 함성: '우~' 하고 올라가는 목소리 몇 개 + 휘파람. 잡음 없이 음정 있는 소리로만
+  cheer(v = 1) {
+    if (!AU.ctx) return; const C = AU.ctx;
+    for (let i = 0; i < 4; i++) {
+      const t = C.currentTime + rand(0, .5), f = rand(230, 380), o = C.createOscillator(), l = C.createOscillator(), lg = C.createGain(), bp = C.createBiquadFilter(), g = C.createGain();
+      o.type = 'triangle'; o.frequency.setValueAtTime(f, t); o.frequency.linearRampToValueAtTime(f * 1.45, t + .5); o.frequency.linearRampToValueAtTime(f * 1.3, t + 1.1);
+      l.frequency.value = rand(5, 7); lg.gain.value = 25; l.connect(lg).connect(o.detune);
+      bp.type = 'bandpass'; bp.frequency.value = 800; bp.Q.value = 1.4;
+      o.connect(bp).connect(g).connect(AU.sfx); env(g, t, .25, .05 * v, .9); o.start(t); l.start(t); o.stop(t + 1.3); l.stop(t + 1.3);
+    }
+    for (let i = 0; i < 2; i++) { const t0 = rand(0, 1), f = rand(1900, 2500), t = C.currentTime + t0, o = C.createOscillator(), g = C.createGain();
+      o.frequency.setValueAtTime(f, t); o.frequency.linearRampToValueAtTime(f * 1.25, t + .25); o.frequency.linearRampToValueAtTime(f * .9, t + .4);
+      o.connect(g).connect(AU.sfx); env(g, t, .02, .035 * v, .4); o.start(t); o.stop(t + .5); }
+  },
 };
 function audioUpdate(dt) {
   if (!AU.ctx) return;
@@ -2379,12 +2397,10 @@ function audioUpdate(dt) {
   AU.eG.gain.setTargetAtTime(play ? .05 + E.thr * .06 + E.rpm / REDLINE * .03 : 0, t, .08);
   // 관중 소리: 가장 가까운 관중까지 거리로 크기를 정함 (5m 안이면 최대, 45m 밖이면 작게)
   const prox = play && CR ? clamp(1 - (CR.near - 5) / 40, 0, 1) : 0;
-  AU.crowdG.gain.setTargetAtTime(play ? .03 + .32 * prox * prox + .22 * S.cheer : 0, t, .25);
-  if (Math.random() < dt * 3) AU.cheerG.gain.setTargetAtTime(rand(.05, .35) + prox * .4 + S.cheer * .6, t, .3);
+  // 관중 가까이 가면 함성이 더 자주, 더 크게 (출발·완주 때도)
+  if (play && Math.random() < dt * (prox * 1.6 + S.cheer * 2)) sfx.cheer(.4 + prox * .8 + S.cheer * .5);
   const slide = play && V.vx > 4 ? clamp((Math.abs(V.beta) - .1) * 3 + (V.lock ? .8 : 0), 0, 1) : 0;
-  AU.sqG.gain.setTargetAtTime(V.grass ? 0 : slide * .14, t, .06);
-  AU.rbG.gain.setTargetAtTime(play && V.grass ? clamp(V.vx / 20, 0, 1) * .5 : 0, t, .08);
-  AU.wdG.gain.setTargetAtTime(play ? Math.min(.12, (V.vx / 32) ** 2 * .12) : 0, t, .2);
+  AU.sqG.gain.setTargetAtTime(V.grass ? 0 : slide * .07, t, .06);
 }
 // 배경음악: 140BPM 하프타임 트랩 비트 (Am-F-Dm-E). 킥, 808 베이스, 클랩, 하이햇 롤, 패드, 아르페지오
 const STEP = 60 / 140 / 4;
@@ -2409,17 +2425,9 @@ function playStep(n, t) {
       env(bg, t, .012, vol, Math.max(.15, dur - .03)); b.start(t); b.stop(t + dur + .05);
     });
   }
-  if (s === 8 || (bar % 4 === 3 && s === 15)) {                         // 스네어: 음정 있는 몸통 + 아주 작은 잡음
+  if (s === 8 || (bar % 4 === 3 && s === 15)) {                         // 스네어: 음정 있는 몸통만 (잡음 없음)
     const o = node('triangle', 210), g = gn(); o.frequency.setValueAtTime(230, t); o.frequency.exponentialRampToValueAtTime(140, t + .12);
     o.connect(g).connect(out); env(g, t, .002, s === 8 ? .28 : .12, .14); o.start(t); o.stop(t + .2);
-    const src = C.createBufferSource(), bp = C.createBiquadFilter(), ng = gn();
-    src.buffer = AU.noise; bp.type = 'bandpass'; bp.frequency.value = 2200; bp.Q.value = 1.2;
-    src.connect(bp).connect(ng).connect(out); env(ng, t, .002, s === 8 ? .06 : .025, .09); src.start(t, Math.random()); src.stop(t + .15);
-  }
-  if (s % 4 === 2) {                                                   // 셰이커: 박자 사이에만 아주 작게
-    const src = C.createBufferSource(), bp = C.createBiquadFilter(), g = gn();
-    src.buffer = AU.noise; bp.type = 'bandpass'; bp.frequency.value = 5500; bp.Q.value = 1.5;
-    src.connect(bp).connect(g).connect(out); env(g, t, .004, .018, .03); src.start(t, Math.random()); src.stop(t + .08);
   }
   if (s === 0) {                                                       // 패드
     ch.n.forEach(m => [-7, 7].forEach(det => {
@@ -2811,7 +2819,7 @@ async function joinGame(code, asHost, name) {
   const r = NET.room = joinRoom('r-' + code);
   const hi = r.makeAction('hi'), st = r.makeAction('st'), go = r.makeAction('go');
   NET.act = { hi, st, go };
-  const me = () => ({ nick:SET.nick, color:SET.color, host:NET.host, name:NET.name });
+  const me = NET.me = () => ({ nick:SET.nick, color:SET.color, host:NET.host, name:NET.name });
   r.onPeerJoin = id => {
     if (NET.host && Object.keys(NET.peers).length >= 7) return;    // 8명까지
     hi.send(me(), { target:id });
@@ -2842,8 +2850,17 @@ function leaveGame(silent) {
     $('olHome').classList.remove('hidden'); $('olRoom').classList.add('hidden');
   }
 }
+function refreshOlColors() {
+  const box = $('olColors'); if (!box) return;
+  if (!box.children.length) LIVERIES.forEach(([name, hex]) => {
+    const b = document.createElement('button'); b.style.background = hex; b.title = name; b.dataset.hex = hex;
+    b.onclick = () => pickColor(hex, name); box.appendChild(b);
+  });
+  box.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.hex.toLowerCase() === SET.color.toLowerCase()));
+}
 function renderPlayers() {
   if (!NET.code) return;
+  refreshOlColors();
   $('olRoomName').textContent = NET.name || `방 ${NET.code}`;
   $('olCode').textContent = NET.code;
   const list = [{ nick:SET.nick + ' (나)', color:SET.color, host:NET.host }, ...Object.entries(NET.peers).map(([id, p]) => ({ ...p, host:id === NET.hostId }))];
@@ -2947,6 +2964,8 @@ function pickColor(hex, name) {
   $('colorIn').value = hex;
   swBox.querySelectorAll('.sw[data-hex]').forEach(b => b.classList.toggle('on', b.dataset.hex.toLowerCase() === hex.toLowerCase()));
   gIdle = 0;
+  if (NET.room && NET.act) NET.act.hi.send(NET.me());               // 온라인 방 안이면 바뀐 색을 다른 사람에게 알림
+  renderPlayers(); refreshOlColors();
 }
 // 왼쪽 위 방패 문장
 {
