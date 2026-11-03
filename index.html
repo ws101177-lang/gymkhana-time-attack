@@ -334,7 +334,7 @@
       <p class="tiny" id="olStatus"></p>
     </div>
     <button class="link" id="olClose">닫기</button>
-    <p class="tiny">브라우저끼리 직접(WebRTC) 연결해요. 서로를 찾을 때만 공개 중계 서버를 거쳐서, 닉네임과 차 위치가 그쪽을 지나갈 수 있어요. 최대 8명.</p>
+    <p class="tiny">공개 중계 서버(MQTT)를 거쳐 주고받아서 휴대폰 데이터·와이파이 어디서든 연결돼요. 닉네임과 차 위치가 그 서버를 지나가요. 최대 8명.</p>
   </div>
 </div>
 
@@ -2720,24 +2720,74 @@ function raceResult() {
   return { pos, html:rows.map((r, i) => `<tr class="${r.me ? 'best' : ''}"><td>${i + 1}. ${esc(r.name)}</td><td>${i === 0 ? fmt(r.t) : '+' + (r.t - rows[0].t).toFixed(2)}${r.est ? ' *' : ''}</td></tr>`).join('') };
 }
 
-// ---------- 온라인: Trystero(WebRTC P2P). 공개 중계 서버로 서로를 찾은 뒤 브라우저끼리 직접 연결 ----------
-const NET = { lib:null, lobby:null, ann:null, room:null, act:null, code:null, name:'', host:false, hostId:null, self:null, peers:{}, rooms:{}, started:false, sendAt:0, timer:0 };
-const NET_CFG = { appId:'racing-arcade-yusae-v1' };
+// ---------- 온라인: 공개 MQTT 중계 서버(웹소켓)를 거쳐 메시지를 주고받음 ----------
+// 브라우저끼리 직접 잇는 방식(WebRTC)은 휴대폰 데이터·학교 와이파이처럼 공유기가 막는 곳에서 서로를 못 찾아서,
+// 모든 메시지를 중계 서버로 보냄. 서버 하나가 막혀도 만나도록 두 곳에 동시에 붙고, 겹쳐 받은 메시지는 버림
+const NET = { bus:null, lobby:null, ann:null, room:null, act:null, code:null, name:'', host:false, hostId:null,
+  self:Math.random().toString(36).slice(2, 12), peers:{}, rooms:{}, started:false, sendAt:0, timer:0 };
+const NET_BASE = 'racing-arcade-yusae/v2/', BROKERS = ['wss://broker.emqx.io:8084/mqtt', 'wss://broker.hivemq.com:8884/mqtt'];
 async function netLib() {
-  if (!NET.lib) NET.lib = await import('https://cdn.jsdelivr.net/npm/trystero@0.25.4/+esm');
-  NET.self = NET.lib.selfId; return NET.lib;
+  if (!NET.bus) {
+    const lib = await import('https://cdn.jsdelivr.net/npm/mqtt@5.15.1/+esm'), mqtt = lib.default || lib;
+    const bus = NET.bus = { clients:[], handlers:new Set(), subs:new Set(), seen:new Map(), n:0 };
+    BROKERS.forEach(url => {
+      const c = mqtt.connect(url, { clientId:'ra_' + NET.self + '_' + bus.clients.length, reconnectPeriod:3000, connectTimeout:8000, keepalive:30 });
+      c.on('connect', () => bus.subs.forEach(t => c.subscribe(t)));
+      c.on('message', (topic, buf) => {
+        let m; try { m = JSON.parse(buf.toString()); } catch { return; }
+        if (!m || m.f === NET.self) return;
+        const key = m.f + ':' + m.n;                                    // 두 서버에서 같은 메시지가 오면 한 번만 처리
+        if (bus.seen.has(key)) return;
+        bus.seen.set(key, 1); if (bus.seen.size > 4000) bus.seen.delete(bus.seen.keys().next().value);
+        bus.handlers.forEach(h => h(topic, m));
+      });
+      bus.clients.push(c);
+    });
+    bus.pub = (topic, d, to) => { const msg = JSON.stringify({ f:NET.self, n:++bus.n, d, to }); bus.clients.forEach(c => c.connected && c.publish(topic, msg)); };
+    bus.sub = t => { bus.subs.add(t); bus.clients.forEach(c => c.connected && c.subscribe(t)); };
+    bus.unsub = t => { bus.subs.delete(t); bus.clients.forEach(c => c.connected && c.unsubscribe(t)); };
+    // 둘 중 하나라도 붙을 때까지 기다림 (최대 8초)
+    await new Promise(res => { const t0 = Date.now(), iv = setInterval(() => { if (bus.clients.some(c => c.connected) || Date.now() - t0 > 8000) { clearInterval(iv); res(); } }, 100); });
+    if (!bus.clients.some(c => c.connected)) throw new Error('no broker');
+  }
+  return joinRoom;
+}
+// 방 하나: 주제(topic) 아래로 주고받음. 처음 메시지를 보낸 사람이 '들어옴', 20초 동안 소식이 없거나 '나감'을 보내면 '나감'
+function joinRoom(name) {
+  const bus = NET.bus, topic = NET_BASE + name, seen = {}, actions = {};
+  const room = { onPeerJoin:null, onPeerLeave:null };
+  const pub = (a, d, to) => bus.pub(topic + '/' + a, d, to);
+  const h = (tp, m) => {
+    if (!tp.startsWith(topic + '/') || (m.to && m.to !== NET.self)) return;
+    const a = tp.slice(topic.length + 1);
+    if (a === '_bye') { if (seen[m.f]) { delete seen[m.f]; room.onPeerLeave?.(m.f); } return; }
+    const fresh = !seen[m.f]; seen[m.f] = Date.now();
+    if (fresh) room.onPeerJoin?.(m.f);
+    if (a !== '_ping') actions[a]?.onMessage?.(m.d, { peerId:m.f });
+  };
+  bus.handlers.add(h); bus.sub(topic + '/#');
+  const timer = setInterval(() => {
+    pub('_ping', 0);
+    const now = Date.now();
+    for (const id in seen) if (now - seen[id] > 20000) { delete seen[id]; room.onPeerLeave?.(id); }   // 휴대폰 화면이 잠깐 꺼져도 바로 빠지지 않게 20초
+  }, 2500);
+  pub('_ping', 0);
+  room.makeAction = a => (actions[a] = { send:(d, o = {}) => pub(a, d, o.target), onMessage:null });
+  room.leave = () => { pub('_bye', 0); clearInterval(timer); bus.handlers.delete(h); bus.unsub(topic + '/#'); };
+  return room;
 }
 function olStatus(t) { $('olStatus').textContent = t; }
 async function openOnline(code) {
   $('online').classList.remove('hidden'); $('olNick').textContent = SET.nick;
   if (!NET.room) { $('olHome').classList.remove('hidden'); $('olRoom').classList.add('hidden'); }
-  try { await joinLobby(); } catch (e) { $('olList').textContent = '온라인 연결 라이브러리를 불러오지 못했어요. 인터넷 연결을 확인해 주세요.'; return; }
+  $('olList').innerHTML = '<p class="tiny">중계 서버에 연결하는 중…</p>';
+  try { await joinLobby(); } catch (e) { $('olList').textContent = '온라인 중계 서버에 연결하지 못했어요. 인터넷 연결을 확인하거나 잠시 뒤 다시 열어 주세요.'; return; }
   if (code && !NET.room) joinGame(code, false, '');
 }
 async function joinLobby() {
   if (NET.lobby) return;
-  const { joinRoom } = await netLib();
-  NET.lobby = joinRoom(NET_CFG, 'lobby');
+  await netLib();
+  NET.lobby = joinRoom('lobby');
   NET.ann = NET.lobby.makeAction('ann');
   NET.ann.onMessage = (d, { peerId }) => { if (d && d.code) { NET.rooms[d.code] = { ...d, at:Date.now(), peerId }; renderRooms(); } };
   NET.lobby.onPeerJoin = () => announce();
@@ -2755,10 +2805,10 @@ function renderRooms() {
   $('olList').querySelectorAll('button[data-code]').forEach(b => b.onclick = () => joinGame(b.dataset.code, false, ''));
 }
 async function joinGame(code, asHost, name) {
-  const { joinRoom } = await netLib();
+  await netLib();
   leaveGame(true);
   Object.assign(NET, { code, host:asHost, name, peers:{}, hostId:asHost ? NET.self : null, started:false });
-  const r = NET.room = joinRoom(NET_CFG, 'r-' + code);
+  const r = NET.room = joinRoom('r-' + code);
   const hi = r.makeAction('hi'), st = r.makeAction('st'), go = r.makeAction('go');
   NET.act = { hi, st, go };
   const me = () => ({ nick:SET.nick, color:SET.color, host:NET.host, name:NET.name });
@@ -2809,7 +2859,7 @@ function beginOnlineRace(order) {
 }
 // 내 상태를 초당 약 15번 보냄
 function netSend(now) {
-  if (!RACE.online || !NET.act || now - NET.sendAt < 66) return;
+  if (!RACE.online || !NET.act || now - NET.sendAt < 100) return;
   NET.sendAt = now;
   NET.act.st.send({ x:+V.x.toFixed(2), z:+V.z.toFixed(2), h:+V.h.toFixed(3), v:+Math.max(0, V.vx).toFixed(1), p:+RACE.p.toFixed(1), fin:RACE.fin });
 }
