@@ -93,6 +93,28 @@
     .sw { width:120px; }
   }
 
+  .modeSeg { margin-bottom:8px; }
+  .modeSeg button { font-size:12px; padding:7px 2px; }
+  .nick { display:flex; align-items:center; gap:8px; font-size:12px; margin-bottom:8px; opacity:.9; }
+  .nick input { flex:1; min-width:0; background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.2); border-radius:8px; color:#fff; padding:6px 8px; font:inherit; font-weight:700; }
+  .trk.off { opacity:.3; pointer-events:none; }
+  .standings { list-style:none; margin:0; padding:0 0 6px; font-size:13px; }
+  .standings li { display:flex; align-items:center; gap:6px; padding:2px 10px; border-top:1px solid rgba(255,255,255,.06); }
+  .standings li b { width:16px; text-align:right; }
+  .standings li i { width:4px; height:14px; border-radius:2px; }
+  .standings li span { flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-weight:700; }
+  .standings li em { font-style:normal; opacity:.6; font-size:11px; }
+  .standings li.me { background:rgba(225,6,0,.35); }
+  .card.wide { max-width:460px; text-align:left; }
+  .rooms { max-height:38vh; overflow:auto; margin:10px 0; }
+  .room { display:flex; align-items:center; gap:10px; padding:8px 10px; border-radius:10px; background:rgba(255,255,255,.05); margin-bottom:6px; }
+  .room div { flex:1; } .room b { display:block; } .room span { font-size:12px; opacity:.65; }
+  .room .primary { flex:0 0 auto; padding:8px 16px; font-size:14px; }
+  .room .primary:disabled { opacity:.35; }
+  .players { list-style:none; padding:0; margin:10px 0; display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+  .players li { display:flex; align-items:center; gap:8px; background:rgba(255,255,255,.06); border-radius:8px; padding:7px 10px; font-weight:700; font-size:14px; }
+  .players li i { width:12px; height:12px; border-radius:50%; }
+  .players li em { font-style:normal; font-size:10px; background:var(--red); padding:1px 5px; border-radius:3px; }
   /* ---------- 주행 화면 (F1 중계 그래픽 느낌) ---------- */
   #hud { pointer-events:none; }
   .tower { position:fixed; top:calc(10px + env(safe-area-inset-top)); left:10px; width:226px; background:var(--panel); border-radius:4px 4px 10px 10px;
@@ -219,6 +241,8 @@
       <dt>흡기 형식</dt><dd>NA(자연흡기)</dd>
     </dl>
     <p class="note">※ 게임 속 설정값</p>
+    <label class="nick">닉네임 <input id="nickIn" maxlength="12" autocomplete="off"></label>
+    <div class="seg modeSeg" id="modeSeg"><button data-m="ta">타임어택</button><button data-m="race">AI 레이스 8대</button><button data-m="online">온라인</button></div>
     <div class="tracks">
       <button class="trk" data-t="A"><canvas width="240" height="104"></canvas><b>A · 짐카나</b><span>콘 코스 1바퀴</span></button>
       <button class="trk" data-t="B"><canvas width="240" height="104"></canvas><b>B · 모나코 시가지</b><span>3바퀴 · 벽 주의</span></button>
@@ -244,6 +268,7 @@
       <span>CHECK</span><b id="hCp">0/0</b>
     </div>
     <div class="delta num hidden" id="hDelta"></div>
+    <ol class="standings num hidden" id="standings"></ol>
   </div>
   <div class="mapcol">
     <div class="tools">
@@ -293,6 +318,26 @@
   </div>
 </div>
 
+<div id="online" class="overlay hidden">
+  <div class="card wide">
+    <div class="eyebrow">ONLINE · 같은 링크로 들어온 사람끼리</div>
+    <div id="olHome">
+      <p class="detail">내 닉네임: <b id="olNick"></b></p>
+      <div class="btnRow"><button class="primary" id="olCreate">방 만들기</button><button class="secondary" id="olRefresh">방 찾기 ↻</button></div>
+      <div id="olList" class="rooms"></div>
+    </div>
+    <div id="olRoom" class="hidden">
+      <h2 id="olRoomName" style="margin:6px 0 2px"></h2>
+      <p class="detail">방 코드 <b id="olCode"></b> · <button class="link" id="olCopy" style="margin:0">초대 링크 복사</button></p>
+      <ul id="olPlayers" class="players"></ul>
+      <div class="btnRow"><button class="primary" id="olStart">START (방장)</button><button class="secondary" id="olLeave">나가기</button></div>
+      <p class="tiny" id="olStatus"></p>
+    </div>
+    <button class="link" id="olClose">닫기</button>
+    <p class="tiny">브라우저끼리 직접(WebRTC) 연결해요. 서로를 찾을 때만 공개 중계 서버를 거쳐서, 닉네임과 차 위치가 그쪽을 지나갈 수 있어요. 최대 8명.</p>
+  </div>
+</div>
+
 <script type="importmap">
 { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
@@ -333,7 +378,7 @@ const store = {
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
   del(k) { try { localStorage.removeItem(k); } catch {} },
 };
-const SET = Object.assign({ track:'A', color:'#1f4fd6', night:false, music:true, sfx:true, muted:false }, store.get(SET_KEY, {}));
+const SET = Object.assign({ track:'A', color:'#1f4fd6', night:false, music:true, sfx:true, muted:false, mode:'ta', nick:'PLAYER' + (10 + Math.random() * 89 | 0) }, store.get(SET_KEY, {}));
 const saveSet = () => store.set(SET_KEY, SET);
 
 // ---------- 트랙 (지도 좌표: x 동쪽, y 북쪽, 단위 m) ----------
@@ -446,6 +491,13 @@ function prepTrack(T) {
     }
     T.kerb = T.turn.map((_, k) => { for (let d = -4; d <= 4; d++) if (Math.abs(T.turn[(k + d + NS) % NS]) > 1 / 35) return true; return false; });
     if (T.tun) T.tunS = [T.tun[0] * SPS, T.tun[1] * SPS];
+    // AI용: 샘플마다 누적 거리, 코너 반지름으로 정한 최고 속도(횡가속 1.4g)를 브레이크 거리(1.1g)까지 고려해 앞쪽부터 깎은 속도표
+    T.cum = [0]; for (let k = 1; k <= NS; k++) T.cum.push(T.cum[k - 1] + Math.hypot(S[k][0] - S[k - 1][0], S[k][1] - S[k - 1][1]));
+    T.vprof = T.turn.map((_, k) => { let c = 0; for (let d = -3; d <= 3; d++) c = Math.max(c, Math.abs(T.turn[(k + d + NS) % NS])); return Math.min(33, Math.sqrt(13.5 / Math.max(c, 1e-3))); });
+    for (let pass = 0; pass < 2; pass++) for (let k = NS - 1; k >= 0; k--) {
+      const n = (k + 1) % NS, ds = T.cum[k + 1] - T.cum[k];
+      T.vprof[k] = Math.min(T.vprof[k], Math.sqrt(T.vprof[n] ** 2 + 2 * 10.5 * ds));
+    }
   }
   return T;
 }
@@ -1387,7 +1439,7 @@ function livTex(w, h, draw) {
   const c = document.createElement('canvas'); c.width = w; c.height = h;
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8; t.flipY = false;
   const redraw = () => { draw(c.getContext('2d'), w, h); t.needsUpdate = true; };
-  LIVTEX.push(redraw); return t;
+  t.userData.draw = draw; LIVTEX.push(redraw); return t;
 }
 // 단면 둘레 u: 0 아래 → .25 오른쪽 → .5 위 → .75 왼쪽. v: 0 앞 → 1 뒤
 function sideText(c, w, h, txt, u, v, size, color, stroke) {
@@ -1704,6 +1756,8 @@ function reset() {
   hud.delta.classList.add('hidden');
   $('result').classList.add('hidden');
   setLights(0); $('lights').classList.toggle('hidden', S.mode !== 'play');
+  if (RACE.on && T.street && S.mode === 'play') setupRace(); else clearOpps();
+  $('standings').classList.toggle('hidden', !RACE.on);
   updateNextPath();
   camInit = true;
 }
@@ -1748,7 +1802,8 @@ function finish(dnf) {
   showHint(''); S.off = false;
   const total = eff();
   let record = false;
-  if (!dnf && (!ghost || total < ghost.total)) {
+  if (RACE.on) RACE.fin = dnf ? null : S.t;
+  if (!RACE.on && !dnf && (!ghost || total < ghost.total)) {
     ghost = { total, raw:S.t, pen:S.pen, frames:rec.f.map(v => Math.round(v * 100) / 100), splits:rec.splits };
     store.set(GHOST_KEY(T.id), ghost);
     record = true;
@@ -1768,6 +1823,14 @@ function finish(dnf) {
     const best = S.laps.length ? Math.min(...S.laps) : 0;
     $('rLaps').innerHTML = T.closed && S.laps.length ? S.laps.map((l, i) => `<tr class="${l === best ? 'best' : ''}"><td>LAP ${i + 1}</td><td>${fmt(l)}</td></tr>`).join('') : '';
     $('againBtn').textContent = ghost ? '고스트와 다시 하기' : '다시 하기';
+    if (RACE.on) {
+      const r = raceResult();
+      $('rReason').textContent = `${RACE.online ? 'ONLINE' : 'AI'} RACE · ${r.pos}위 / ${RACE.opps.length + 1}대`;
+      $('rTime').textContent = dnf ? 'DNF' : `P${r.pos} · ${fmt(S.t)}`;
+      $('rDetail').innerHTML = '* 표시는 아직 달리는 차의 예상 기록';
+      $('rLaps').innerHTML = r.html;
+      $('againBtn').textContent = RACE.online ? '방으로 돌아가기' : '다시 레이스';
+    }
     $('result').classList.remove('hidden');
   }, 2900);
 }
@@ -1779,11 +1842,13 @@ function gateCheck(px, pz) {
   const s0 = (px - g.x) * g.tx + (pz - g.z) * g.tz, s1 = (V.x - g.x) * g.tx + (V.z - g.z) * g.tz;
   if (!(s0 < 0 && s1 >= 0 && Math.abs(-(V.x - g.x) * g.tz + (V.z - g.z) * g.tx) <= g.hw)) return;
   if (S.k === 0) {
-    S.running = true; S.t = 0; S.lapStart = 0; rec = { f:[], splits:[] };
-    showBig(T.closed ? 'LAP 1' : 'START!', '기록 시작', '#00d26a', 1000); S.cheer = Math.max(S.cheer, .6);
+    if (!RACE.on) {
+      S.running = true; S.t = 0; S.lapStart = 0; rec = { f:[], splits:[] };
+      showBig(T.closed ? 'LAP 1' : 'START!', '기록 시작', '#00d26a', 1000); S.cheer = Math.max(S.cheer, .6);
+    }
   } else {
     rec.splits.push(eff());
-    const gs = ghost && ghost.splits[S.k - 1];
+    const gs = !RACE.on && ghost && ghost.splits[S.k - 1];
     if (gs != null) showDelta(eff() - gs, `GHOST`);
     if (T.closed && S.k % N === 0) {                                    // 한 바퀴 완료
       const lt = S.t - S.lapStart; S.laps.push(lt); S.lapStart = S.t;
@@ -1899,6 +1964,7 @@ function step(dt) {
     if (n !== S.lightN) { S.lightN = n; setLights(n); if (n > 0) sfx.beep(n); }
     if (S.lightT >= S.outAt) {
       S.count = 0; setLights(0); sfx.go();
+      if (RACE.on) { S.running = true; S.t = 0; S.lapStart = 0; rec = { f:[], splits:[] }; }   // 레이스는 불이 꺼지는 순간 모두 같이 시계 시작
       showBig('GO!', 'LIGHTS OUT', '#00d26a', 900); S.cheer = Math.max(S.cheer, .5);
       setTimeout(() => { if (S.count === 0) $('lights').classList.add('hidden'); }, 1100);
     }
@@ -1906,7 +1972,7 @@ function step(dt) {
   const px = V.x, pz = V.z;
   if (ctrl.drift) physics(dt, ctrl); else gripPhysics(dt, ctrl);
   V.pitch += (V.ax * 0.0035 - V.pitch) * Math.min(1, dt * 8);
-  V.roll += (-V.ay * 0.0035 - V.roll) * Math.min(1, dt * 8);
+  V.roll += (V.ay * 0.0035 - V.roll) * Math.min(1, dt * 8);        // 원심력 방향(코너 바깥쪽)으로 차체가 기울어짐
   V.beta = V.vx > 3 ? Math.atan2(V.vy, V.vx) : 0;
 
   // 바깥 벽과 건물
@@ -1936,8 +2002,10 @@ function step(dt) {
     V.vx = wx * fx + wz * fz; V.vy = wx * fz - wz * fx; V.r *= .6; V.road = lim;
     const now = performance.now();
     if (vn > 1.5 && now - S.hitAt > 300) { S.hitAt = now; S.shake = Math.min(.5, vn * .05); sfx.crash(Math.min(1, vn / 12)); }
-    if (Math.abs(V.vx) > 3 && Math.random() < .25) { puff(V.x + nx * .7, V.z + nz * .7); if (Math.random() < .5) sfx.scrape(); }
+    if (Math.abs(V.vx) > 3 && Math.random() < .25) puff(V.x + nx * .7, V.z + nz * .7);
+    if (Math.abs(V.vx) > 3 && now - (S.scrapeAt || 0) > 160) { S.scrapeAt = now; sfx.scrape(); }   // 긁힘 소리는 0.16초에 한 번까지
   }
+  if (RACE.on && T.street) raceStep(dt);
   const v = V.vx;
   marks();
 
@@ -2236,7 +2304,10 @@ function audioInit() {
   if (AU.ctx) { if (AU.ctx.state === 'suspended') AU.ctx.resume(); return; }
   const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
   const C = new AC(); AU.ctx = C;
-  const comp = C.createDynamicsCompressor(); comp.threshold.value = -14; comp.ratio.value = 4; comp.connect(C.destination);
+  // 출력 단: 압축기 + 리미터로 여러 소리가 겹쳐도 0dB를 넘어 찢어지지 않게 함
+  const comp = C.createDynamicsCompressor(); comp.threshold.value = -18; comp.knee.value = 8; comp.ratio.value = 4; comp.attack.value = .005; comp.release.value = .25;
+  const lim = C.createDynamicsCompressor(); lim.threshold.value = -4; lim.knee.value = 0; lim.ratio.value = 20; lim.attack.value = .001; lim.release.value = .1;
+  const out = C.createGain(); out.gain.value = .8; comp.connect(lim).connect(out).connect(C.destination);
   AU.master = C.createGain(); AU.master.gain.value = SET.muted ? 0 : 1; AU.master.connect(comp);
   AU.music = C.createGain(); AU.music.gain.value = 0; AU.music.connect(AU.master);
   AU.sfx = C.createGain(); AU.sfx.gain.value = SET.sfx ? 1 : 0; AU.sfx.connect(AU.master);
@@ -2248,10 +2319,10 @@ function audioInit() {
   const gain = v => { const g = C.createGain(); g.gain.value = v; return g; };
   // 엔진: 톱니파 2개 + 사각파(반 옥타브 아래) → 일그러뜨림 → 저역 통과
   const ws = C.createWaveShaper(), curve = new Float32Array(1024);
-  for (let i = 0; i < 1024; i++) { const x = i / 512 - 1; curve[i] = Math.tanh(x * 3); }
+  for (let i = 0; i < 1024; i++) { const x = i / 512 - 1; curve[i] = Math.tanh(x * 1.6) / Math.tanh(1.6); }
   ws.curve = curve;
-  AU.eLP = filt('lowpass', 1200, 3); AU.eG = gain(0);
-  AU.eO = [['sawtooth', 1, 0, .5], ['sawtooth', 2, 8, .3], ['square', .5, 0, .35]].map(([type, mul, det, g]) => {
+  AU.eLP = filt('lowpass', 1200, 1.2); AU.eG = gain(0);
+  AU.eO = [['sawtooth', 1, 0, .32], ['sawtooth', 2, 8, .16], ['triangle', .5, 0, .3]].map(([type, mul, det, g]) => {
     const o = C.createOscillator(); o.type = type; o.detune.value = det; const og = gain(g); o.connect(og).connect(ws); o.start(); return { o, mul };
   });
   ws.connect(AU.eLP).connect(AU.eG).connect(AU.sfx);
@@ -2301,13 +2372,13 @@ function audioUpdate(dt) {
   const f = E.rpm / 60 * 2;                                            // 4기통 점화 주파수
   AU.eO.forEach(({ o, mul }) => o.frequency.setTargetAtTime(f * mul, t, .03));
   AU.eLP.frequency.setTargetAtTime(500 + E.thr * 2600 + E.rpm / REDLINE * 1500, t, .05);
-  AU.eG.gain.setTargetAtTime(play ? .05 + E.thr * .07 + E.rpm / REDLINE * .03 : 0, t, .06);
+  AU.eG.gain.setTargetAtTime(play ? .05 + E.thr * .06 + E.rpm / REDLINE * .03 : 0, t, .08);
   // 관중 소리: 가장 가까운 관중까지 거리로 크기를 정함 (5m 안이면 최대, 45m 밖이면 작게)
   const prox = play && CR ? clamp(1 - (CR.near - 5) / 40, 0, 1) : 0;
-  AU.crowdG.gain.setTargetAtTime(play ? .03 + .5 * prox * prox + .35 * S.cheer : 0, t, .25);
+  AU.crowdG.gain.setTargetAtTime(play ? .03 + .32 * prox * prox + .22 * S.cheer : 0, t, .25);
   if (Math.random() < dt * 3) AU.cheerG.gain.setTargetAtTime(rand(.05, .35) + prox * .4 + S.cheer * .6, t, .3);
   const slide = play && V.vx > 4 ? clamp((Math.abs(V.beta) - .1) * 3 + (V.lock ? .8 : 0), 0, 1) : 0;
-  AU.sqG.gain.setTargetAtTime(V.grass ? 0 : slide * .22, t, .05);
+  AU.sqG.gain.setTargetAtTime(V.grass ? 0 : slide * .14, t, .06);
   AU.rbG.gain.setTargetAtTime(play && V.grass ? clamp(V.vx / 20, 0, 1) * .5 : 0, t, .08);
   AU.wdG.gain.setTargetAtTime(play ? Math.min(.12, (V.vx / 32) ** 2 * .12) : 0, t, .2);
 }
@@ -2365,7 +2436,7 @@ function playStep(n, t) {
 }
 function setMusic() {
   const on = SET.music && !SET.muted, vol = S.mode === 'play' ? .26 : .4;
-  if (AU.fileEl) { AU.fileEl.volume = on ? (S.mode === 'play' ? .55 : .8) : 0; if (on && AU.useFile && AU.ctx) AU.fileEl.play().catch(() => {}); else AU.fileEl.pause(); }
+  if (AU.fileEl) { AU.fileEl.volume = on ? (S.mode === 'play' ? .4 : .75) : 0; if (on && AU.useFile && AU.ctx) AU.fileEl.play().catch(() => {}); else AU.fileEl.pause(); }
   if (!AU.ctx) return;
   AU.music.gain.setTargetAtTime(on ? vol : 0, AU.ctx.currentTime, .3);
   AU.sfx.gain.setTargetAtTime(SET.sfx ? 1 : 0, AU.ctx.currentTime, .05);
@@ -2374,7 +2445,7 @@ function setMusic() {
 
 // ---------- 화면 갱신 ----------
 function placeGhost() {
-  const show = ghost && S.mode === 'play';
+  const show = ghost && S.mode === 'play' && !RACE.on;
   ghostCar.g.visible = !!show;
   if (!show) return;
   const f = ghost.frames, n = f.length / 4;
@@ -2426,7 +2497,8 @@ function updateVisuals(dt, now) {
   sun.position.set(V.x + sd.x * 60, sd.y * 60, V.z + sd.z * 60); sun.target.position.set(V.x, 0, V.z);
 
   hud.time.textContent = fmt(S.running || S.done ? S.t : 0);
-  hud.lap.textContent = `LAP ${Math.min(S.lap, T.laps)}/${T.laps}`;
+  if (!RACE.on) hud.lap.textContent = `LAP ${Math.min(S.lap, T.laps)}/${T.laps}`;
+  else raceVisuals(dt, now);
   hud.pen.textContent = S.pen ? `${S.pen} (+${S.pen * CONE_PENALTY}s)` : '0';
   hud.cp.textContent = T.closed ? `${S.k ? (S.k - 1) % T.CP.length + 1 : 0}/${T.CP.length}` : `${Math.min(S.k, T.CP.length)}/${T.CP.length}`;
   const bestShown = T.closed ? bestLap : ghost && ghost.total;
@@ -2460,6 +2532,7 @@ function frame(now) {
     updateCrowd(dt, now);
     updateVisuals(dt, now);
     updateBackfire(dt, now);
+    netSend(now);
     draw(scene);
   } else {
     updateGarageCam(dt, now);
@@ -2468,9 +2541,282 @@ function frame(now) {
   audioUpdate(dt);
 }
 
+// ---------- 레이스 모드: AI 7대와 함께 8대 출발 / 온라인(같은 방 사람들끼리) ----------
+// 상대 차는 부품 수백 개짜리 차를 재질별로 한 덩어리씩 합쳐(드로우콜 약 20개) 가볍게 만들고, 도색별로 한 번만 만들어 복제해 씀
+const AI_NAMES = ['TURBO KIM', 'APEX LEE', 'NITRO PARK', 'DRIFT CHOI', 'BOOST JUNG', 'CHICANE HAN', 'PITLANE YOON'];
+const RACE = { on:false, online:false, slot:4, opps:[], p:0, lastC:0, fin:null, order:null, hudAt:0 };
+const oppTemplates = {};
+function liveryMats(hex) {
+  const saved = { main:LIV.main, acc:LIV.acc }, map = new Map();
+  LIV.main = hex; LIV.acc = accentOf(hex);
+  [tubMat, podMat, coverMat].forEach(m => {
+    const src = m.map, c = document.createElement('canvas'); c.width = src.image.width; c.height = src.image.height;
+    src.userData.draw(c.getContext('2d'), c.width, c.height);
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.flipY = false; t.anisotropy = 4;
+    const nm = m.clone(); nm.map = t; map.set(m, nm);
+  });
+  const b = M.body.clone(); b.color.set(hex); b.envMapIntensity = .55; map.set(M.body, b);
+  Object.assign(LIV, saved);
+  return map;
+}
+function bakeCar(hex) {
+  if (!oppTemplates[hex]) {
+    const src = buildCar(), mats = liveryMats(hex), groups = new Map();
+    src.g.rotation.set(0, 0, 0); src.g.updateMatrixWorld(true);
+    src.g.traverse(o => {
+      if (!o.isMesh || o === src.shadow) return;
+      const m0 = Array.isArray(o.material) ? o.material[0] : o.material, m = mats.get(m0) || m0;
+      const g = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone();
+      g.applyMatrix4(o.matrixWorld);
+      for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'uv'].includes(k)) g.deleteAttribute(k);
+      if (!g.attributes.uv) g.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2));
+      if (!g.attributes.normal) g.computeVertexNormals();
+      g.clearGroups();
+      if (!groups.has(m)) groups.set(m, []);
+      groups.get(m).push(g);
+    });
+    const grp = new THREE.Group();
+    groups.forEach((list, m) => { const mesh = new THREE.Mesh(mergeGeometries(list), m); mesh.castShadow = true; grp.add(mesh); list.forEach(g => g.dispose()); });
+    grp.add(src.shadow.clone());
+    src.g.traverse(o => { if (o.isMesh && o !== src.shadow) o.geometry.dispose(); });
+    oppTemplates[hex] = grp;
+  }
+  return oppTemplates[hex].clone();
+}
+function nameTag(text, color) {
+  const tex = canvasTex(256, 64, (c, w) => {
+    c.fillStyle = 'rgba(14,14,22,.78)'; c.beginPath(); c.roundRect(2, 8, w - 4, 48, 10); c.fill();
+    c.fillStyle = color; c.fillRect(12, 16, 7, 32);
+    c.fillStyle = '#fff'; c.font = '800 28px "Titillium Web", Arial'; c.textBaseline = 'middle'; c.fillText(text, 28, 33, w - 40);
+  });
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map:tex, depthWrite:false, transparent:true }));
+  s.scale.set(2.2, .55, 1); s.position.y = 1.85; s.renderOrder = 5; return s;
+}
+// 트랙 위 거리 s(0~한 바퀴)와 가로 위치 lane → 월드 좌표·방향
+function idxAt(s) {
+  const c = T.cum; let lo = 0, hi = T.NS;
+  while (hi - lo > 1) { const m = (lo + hi) >> 1; if (c[m] <= s) lo = m; else hi = m; }
+  return lo;
+}
+function posAt(s, lane) {
+  s = ((s % T.len) + T.len) % T.len;
+  const k = idxAt(s), k2 = (k + 1) % T.NS, f = (s - T.cum[k]) / Math.max(.01, T.cum[k + 1] - T.cum[k]);
+  const a = T.SAMP[k], b = T.SAMP[k2], n = T.nrm[k];
+  return { x:a[0] + (b[0] - a[0]) * f + n[0] * lane, z:a[1] + (b[1] - a[1]) * f + n[1] * lane, h:Math.atan2(b[0] - a[0], b[1] - a[1]), k };
+}
+// 출발 그리드: 출발선 뒤로 6.5m 간격, 좌우 엇갈림
+const gridSlot = i => { const d = 9 + i * 6.5; return { s:T.len - d, p:-d, lane:i % 2 ? 1.6 : -1.6 }; };
+function clearOpps() { RACE.opps.forEach(o => scene.remove(o.g)); RACE.opps = []; }
+function makeOpp(info, slot) {
+  const g = bakeCar(info.color), gs = gridSlot(slot), q = posAt(gs.s, gs.lane);
+  g.add(nameTag(info.name, info.color)); scene.add(g);
+  const o = { ...info, g, s:gs.s, p:gs.p, lane:gs.lane, lane0:gs.lane, laneT:gs.lane, v:0, fin:null, x:q.x, z:q.z, h:q.h, block:0,
+    skill:info.skill || 1, net:{ x:q.x, z:q.z, h:q.h, v:0, p:gs.p, fin:null } };
+  g.position.set(q.x, 0, q.z); g.rotation.y = q.h;
+  RACE.opps.push(o); return o;
+}
+// 레이스 준비: 내 차를 그리드 자리에 놓고 상대 차를 배치
+function setupRace() {
+  clearOpps(); RACE.fin = null;
+  if (RACE.online) {
+    RACE.order.forEach((id, i) => { if (id === NET.self) RACE.slot = i; else { const p = NET.peers[id]; if (p) makeOpp({ id, name:p.nick, color:p.color, remote:true }, i); } });
+  } else {
+    RACE.slot = 4;
+    const cols = LIVERIES.map(l => l[1]).filter(c => c.toLowerCase() !== SET.color.toLowerCase());
+    let n = 0;
+    for (let i = 0; i < 8; i++) if (i !== RACE.slot) {
+      makeOpp({ name:AI_NAMES[n], color:cols[n % cols.length], skill:.9 + (7 - i) * .012 + rand(-.015, .015) }, i); n++;
+    }
+  }
+  const gs = gridSlot(RACE.slot), q = posAt(gs.s, gs.lane);
+  Object.assign(V, { x:q.x, z:q.z, h:q.h, ri:q.k });
+  RACE.p = gs.p; RACE.lastC = T.cum[q.k];
+}
+// 매 물리 단계(1/120초): AI 주행, 내 진행 거리, 차끼리 부딪힘
+function raceStep(dt) {
+  const len = T.len;
+  // 내 진행 거리: 가장 가까운 도로 점이 앞뒤로 움직인 만큼 더함 (한 바퀴 넘어갈 때도 이어짐)
+  const c = T.cum[V.ri ?? 0]; let d = c - RACE.lastC;
+  if (d < -len / 2) d += len; else if (d > len / 2) d -= len;
+  RACE.p += d; RACE.lastC = c;
+  const n = T.nrm[V.ri ?? 0], sp = T.SAMP[V.ri ?? 0], myLane = (V.x - sp[0]) * n[0] + (V.z - sp[1]) * n[1];
+  const me = { p:RACE.p, lane:myLane, v:Math.max(0, V.vx) };
+  for (const o of RACE.opps) {
+    if (o.remote) continue;
+    if (S.count > 0) continue;
+    const k = idxAt(((o.s % len) + len) % len);
+    let tv = T.vprof[k] * o.skill, blocked = false;
+    for (const c2 of [me, ...RACE.opps]) {
+      if (c2 === o) continue;
+      const gap = c2.p - o.p;
+      if (gap > 0 && gap < 11 && Math.abs(c2.lane - o.lane) < 1.9) {
+        tv = Math.min(tv, c2.v + gap * .35 - .6); blocked = true;
+        if (o.block > .6) o.laneT = c2.lane > 0 ? -2 : 2;             // 막히면 반대쪽으로 추월 시도
+      }
+    }
+    o.block = blocked ? o.block + dt : Math.max(0, o.block - dt * .5);
+    if (!blocked && o.block === 0) o.laneT += (o.lane0 * .4 - o.laneT) * dt * .3;
+    o.v += clamp(tv - o.v, -11 * dt, 7 * dt * Math.max(.15, 1 - o.v / 36));
+    o.v = Math.max(0, o.v);
+    o.s += o.v * dt; o.p += o.v * dt;
+    o.lane += clamp(o.laneT - o.lane, -1.5 * dt, 1.5 * dt); o.lane = clamp(o.lane, -2.4, 2.4);
+    if (o.fin == null && o.p >= T.laps * len) o.fin = S.t;
+    const q = posAt(o.s, o.lane); o.x = q.x; o.z = q.z; o.h = q.h + clamp(o.laneT - o.lane, -1, 1) * .12;
+  }
+  // 내 차와 상대 차가 부딪힘: 차를 앞뒤 원 두 개로 보고 겹친 만큼 내 차를 밀어내고 그쪽 속도를 없앰
+  const fx = Math.sin(V.h), fz = Math.cos(V.h);
+  for (const o of RACE.opps) {
+    const ox = Math.sin(o.h), oz = Math.cos(o.h);
+    for (const a of [.8, -.7]) for (const b of [.8, -.7]) {
+      const ax = V.x + fx * a, az = V.z + fz * a, bx = o.x + ox * b, bz = o.z + oz * b;
+      const dx = ax - bx, dz = az - bz, dd = Math.hypot(dx, dz);
+      if (dd > 1.45 || dd < .001) continue;
+      const nx = dx / dd, nz = dz / dd, push = 1.45 - dd;
+      V.x += nx * push; V.z += nz * push;
+      let wx = fx * V.vx + fz * V.vy, wz = fz * V.vx - fx * V.vy;
+      const vn = wx * nx + wz * nz;
+      if (vn < 0) { wx -= nx * vn * 1.2; wz -= nz * vn * 1.2; }
+      V.vx = wx * fx + wz * fz; V.vy = wx * fz - wz * fx;
+      if (!o.remote) o.v *= .985;
+      const now = performance.now();
+      if (-vn > 1.5 && now - S.hitAt > 300) { S.hitAt = now; S.shake = Math.min(.4, -vn * .05); sfx.crash(Math.min(1, -vn / 12)); }
+    }
+  }
+}
+// 화면 갱신: 상대 차 위치(온라인은 받은 위치로 부드럽게 따라감), 순위표
+function raceVisuals(dt, now) {
+  for (const o of RACE.opps) {
+    if (o.remote) {
+      const k = Math.min(1, dt * 12), dh = Math.atan2(Math.sin(o.net.h - o.h), Math.cos(o.net.h - o.h));
+      o.x += (o.net.x - o.x) * k; o.z += (o.net.z - o.z) * k; o.h += dh * k; o.p = o.net.p; o.v = o.net.v; o.fin = o.net.fin;
+    }
+    o.g.position.set(o.x, 0, o.z); o.g.rotation.y = o.h;
+  }
+  if (now - RACE.hudAt < 200) return;
+  RACE.hudAt = now;
+  const list = standings(), myPos = list.findIndex(r => r.me) + 1, N = list.length;
+  hud.lap.textContent = `P${myPos}/${N} · LAP ${Math.min(S.lap, T.laps)}/${T.laps}`;
+  const lead = list[0];
+  $('standings').innerHTML = list.map((r, i) => {
+    const gap = i === 0 ? 'LEADER' : r.fin != null && lead.fin != null ? '+' + (r.fin - lead.fin).toFixed(1) : '+' + Math.max(0, (lead.p - r.p) / Math.max(8, r.v || 8)).toFixed(1);
+    return `<li class="${r.me ? 'me' : ''}"><b>${i + 1}</b><i style="background:${r.color}"></i><span>${esc(r.name)}</span><em>${gap}</em></li>`;
+  }).join('');
+}
+const esc = t => String(t).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+function standings() {
+  const list = [{ name:SET.nick || 'YOU', me:true, p:RACE.p, fin:RACE.fin, color:SET.color, v:Math.max(0, V.vx) },
+    ...RACE.opps.map(o => ({ name:o.name, p:o.p, fin:o.fin, color:o.color, v:o.v }))];
+  return list.sort((a, b) => a.fin != null && b.fin != null ? a.fin - b.fin : a.fin != null ? -1 : b.fin != null ? 1 : b.p - a.p);
+}
+// 레이스 결과표: 아직 못 들어온 차는 남은 거리 ÷ 지금 속도로 도착 시간을 어림
+function raceResult() {
+  const len = T.len;
+  const rows = standings().map(r => ({ ...r, t:r.fin ?? S.t + Math.max(0, T.laps * len - r.p) / Math.max(8, r.v || 8), est:r.fin == null }));
+  rows.sort((a, b) => a.t - b.t);
+  const pos = rows.findIndex(r => r.me) + 1;
+  return { pos, html:rows.map((r, i) => `<tr class="${r.me ? 'best' : ''}"><td>${i + 1}. ${esc(r.name)}</td><td>${i === 0 ? fmt(r.t) : '+' + (r.t - rows[0].t).toFixed(2)}${r.est ? ' *' : ''}</td></tr>`).join('') };
+}
+
+// ---------- 온라인: Trystero(WebRTC P2P). 공개 중계 서버로 서로를 찾은 뒤 브라우저끼리 직접 연결 ----------
+const NET = { lib:null, lobby:null, ann:null, room:null, act:null, code:null, name:'', host:false, hostId:null, self:null, peers:{}, rooms:{}, started:false, sendAt:0, timer:0 };
+const NET_CFG = { appId:'racing-arcade-yusae-v1' };
+async function netLib() {
+  if (!NET.lib) NET.lib = await import('https://cdn.jsdelivr.net/npm/trystero@0.25.4/+esm');
+  NET.self = NET.lib.selfId; return NET.lib;
+}
+function olStatus(t) { $('olStatus').textContent = t; }
+async function openOnline(code) {
+  $('online').classList.remove('hidden'); $('olNick').textContent = SET.nick;
+  if (!NET.room) { $('olHome').classList.remove('hidden'); $('olRoom').classList.add('hidden'); }
+  try { await joinLobby(); } catch (e) { $('olList').textContent = '온라인 연결 라이브러리를 불러오지 못했어요. 인터넷 연결을 확인해 주세요.'; return; }
+  if (code && !NET.room) joinGame(code, false, '');
+}
+async function joinLobby() {
+  if (NET.lobby) return;
+  const { joinRoom } = await netLib();
+  NET.lobby = joinRoom(NET_CFG, 'lobby');
+  NET.ann = NET.lobby.makeAction('ann');
+  NET.ann.onMessage = (d, { peerId }) => { if (d && d.code) { NET.rooms[d.code] = { ...d, at:Date.now(), peerId }; renderRooms(); } };
+  NET.lobby.onPeerJoin = () => announce();
+  NET.timer = setInterval(() => { announce(); renderRooms(); }, 2000);
+  renderRooms();
+}
+function announce() {
+  if (NET.host && NET.code && NET.ann) NET.ann.send({ code:NET.code, name:NET.name, host:SET.nick, n:1 + Object.keys(NET.peers).length, racing:NET.started });
+}
+function renderRooms() {
+  const now = Date.now(), list = Object.values(NET.rooms).filter(r => now - r.at < 7000 && r.code !== NET.code);
+  $('olList').innerHTML = list.length ? list.map(r => `<div class="room"><div><b>${esc(r.name)}</b><span>방장 ${esc(r.host)} · ${r.n}/8명${r.racing ? ' · 경기 중' : ''}</span></div>
+    <button class="primary" data-code="${esc(r.code)}" ${r.n >= 8 ? 'disabled' : ''}>참가</button></div>`).join('')
+    : '<p class="tiny">열린 방을 찾는 중이에요… 없으면 방을 만들어 보세요. (같은 링크로 들어온 사람에게만 보여요)</p>';
+  $('olList').querySelectorAll('button[data-code]').forEach(b => b.onclick = () => joinGame(b.dataset.code, false, ''));
+}
+async function joinGame(code, asHost, name) {
+  const { joinRoom } = await netLib();
+  leaveGame(true);
+  Object.assign(NET, { code, host:asHost, name, peers:{}, hostId:asHost ? NET.self : null, started:false });
+  const r = NET.room = joinRoom(NET_CFG, 'r-' + code);
+  const hi = r.makeAction('hi'), st = r.makeAction('st'), go = r.makeAction('go');
+  NET.act = { hi, st, go };
+  const me = () => ({ nick:SET.nick, color:SET.color, host:NET.host, name:NET.name });
+  r.onPeerJoin = id => {
+    if (NET.host && Object.keys(NET.peers).length >= 7) return;    // 8명까지
+    hi.send(me(), { target:id });
+  };
+  r.onPeerLeave = id => {
+    delete NET.peers[id];
+    const o = RACE.opps.find(o => o.id === id); if (o) { scene.remove(o.g); RACE.opps.splice(RACE.opps.indexOf(o), 1); }
+    if (id === NET.hostId && !NET.host) olStatus('방장이 나갔어요. 다른 방을 찾아 주세요.');
+    renderPlayers(); announce();
+  };
+  hi.onMessage = (d, { peerId }) => {
+    NET.peers[peerId] = { nick:String(d.nick || 'PLAYER').slice(0, 12), color:/^#[0-9a-f]{6}$/i.test(d.color) ? d.color : '#888888' };
+    if (d.host) { NET.hostId = peerId; NET.name = d.name || NET.name; }
+    renderPlayers(); announce();
+  };
+  go.onMessage = (d, { peerId }) => { if (peerId === NET.hostId && Array.isArray(d.order)) beginOnlineRace(d.order); };
+  st.onMessage = (d, { peerId }) => { const o = RACE.opps.find(o => o.id === peerId); if (o && d) Object.assign(o.net, d); };
+  $('olHome').classList.add('hidden'); $('olRoom').classList.remove('hidden');
+  history.replaceState(null, '', `${location.pathname}?room=${code}`);
+  renderPlayers(); announce();
+  olStatus(asHost ? '친구에게 초대 링크를 보내고, 다 모이면 START를 눌러요.' : '방장이 START를 누르면 시작해요.');
+}
+function leaveGame(silent) {
+  if (NET.room) NET.room.leave();
+  NET.room = null; NET.code = null; NET.host = false; NET.peers = {}; NET.started = false;
+  if (!silent) {
+    history.replaceState(null, '', location.pathname);
+    $('olHome').classList.remove('hidden'); $('olRoom').classList.add('hidden');
+  }
+}
+function renderPlayers() {
+  if (!NET.code) return;
+  $('olRoomName').textContent = NET.name || `방 ${NET.code}`;
+  $('olCode').textContent = NET.code;
+  const list = [{ nick:SET.nick + ' (나)', color:SET.color, host:NET.host }, ...Object.entries(NET.peers).map(([id, p]) => ({ ...p, host:id === NET.hostId }))];
+  $('olPlayers').innerHTML = list.map(p => `<li><i style="background:${p.color}"></i>${esc(p.nick)}${p.host ? ' <em>방장</em>' : ''}</li>`).join('');
+  $('olStart').classList.toggle('hidden', !NET.host);
+}
+function beginOnlineRace(order) {
+  NET.started = true; announce();
+  RACE.on = true; RACE.online = true; RACE.order = order;
+  $('online').classList.add('hidden');
+  if (T.id !== 'B') selectTrack('B');
+  startGame();
+}
+// 내 상태를 초당 약 15번 보냄
+function netSend(now) {
+  if (!RACE.online || !NET.act || now - NET.sendAt < 66) return;
+  NET.sendAt = now;
+  NET.act.st.send({ x:+V.x.toFixed(2), z:+V.z.toFixed(2), h:+V.h.toFixed(3), v:+Math.max(0, V.vx).toFixed(1), p:+RACE.p.toFixed(1), fin:RACE.fin });
+}
+
 // ---------- 메뉴 · 화면 전환 ----------
 function startGame() {
   audioInit();
+  if (!RACE.online && SET.mode === 'online') { openOnline(); return; }
+  RACE.on = RACE.online || SET.mode === 'race';
+  if (RACE.on && !TRACKS[T.id].street) selectTrack('B');
   $('menu').classList.add('hidden'); $('hud').classList.remove('hidden');
   S.mode = 'play'; camera.clearViewOffset();
   scene.add(car.g); M.body.envMapIntensity = .55;
@@ -2484,6 +2830,9 @@ function toMenu() {
   garage.add(car.g); M.body.envMapIntensity = 1; ghostCar.g.visible = false;
   for (const k in input) input[k] = false;
   Object.assign(V, STILL); E.rpm = IDLE;
+  clearOpps(); $('standings').classList.add('hidden');
+  if (RACE.online) { RACE.online = false; NET.started = false; announce(); openOnline(); }
+  RACE.on = false;
   refreshMenu(); setMusic();
 }
 function selectTrack(id) {
@@ -2495,7 +2844,10 @@ function selectTrack(id) {
   refreshMenu();
 }
 function refreshMenu() {
-  document.querySelectorAll('.trk').forEach(b => b.classList.toggle('on', b.dataset.t === T.id));
+  document.querySelectorAll('.trk').forEach(b => { b.classList.toggle('on', b.dataset.t === T.id); b.classList.toggle('off', SET.mode !== 'ta' && b.dataset.t === 'A'); });
+  document.querySelectorAll('#modeSeg button').forEach(b => b.classList.toggle('on', b.dataset.m === SET.mode));
+  $('goBtn').textContent = SET.mode === 'online' ? '온라인 방 ▶' : SET.mode === 'race' ? 'RACE START ▶' : 'START ▶';
+  $('nickIn').value = SET.nick;
   ['A', 'B'].forEach(id => {
     const g = store.get(GHOST_KEY(id), null), bl = store.get(LAP_KEY(id), null);
     $('pb' + id).textContent = g ? `${fmt(g.total)}${id === 'B' && bl ? ` · LAP ${fmt(bl)}` : ''}` : '--';
@@ -2639,8 +2991,31 @@ $('resetBtn').onclick = () => { if (S.mode === 'play') reset(); };
 $('menuBtn').onclick = toMenu;
 $('backBtn').onclick = respawn;
 $('goBtn').onclick = startGame;
-$('againBtn').onclick = startGame;
+$('againBtn').onclick = () => RACE.online ? toMenu() : startGame();
 $('toMenuBtn').onclick = toMenu;
+document.querySelectorAll('#modeSeg button').forEach(b => b.onclick = () => {
+  SET.mode = b.dataset.m; saveSet();
+  if (SET.mode !== 'ta' && T.id !== 'B') selectTrack('B');
+  refreshMenu();
+});
+$('nickIn').addEventListener('input', e => { SET.nick = e.target.value.trim().slice(0, 12) || 'PLAYER'; saveSet(); });
+$('nickIn').addEventListener('keydown', e => e.stopPropagation());
+$('olCreate').onclick = () => {
+  const code = Math.random().toString(36).slice(2, 7).toUpperCase();
+  joinGame(code, true, `${SET.nick}의 방`);
+};
+$('olRefresh').onclick = renderRooms;
+$('olStart').onclick = () => {
+  if (!NET.host || !NET.act) return;
+  const order = [NET.self, ...Object.keys(NET.peers)];
+  NET.act.go.send({ order }); beginOnlineRace(order);
+};
+$('olLeave').onclick = () => leaveGame(false);
+$('olClose').onclick = () => $('online').classList.add('hidden');
+$('olCopy').onclick = () => {
+  const url = `${location.origin}${location.pathname}?room=${NET.code}`;
+  (navigator.clipboard ? navigator.clipboard.writeText(url) : Promise.reject()).then(() => olStatus('초대 링크를 복사했어요: ' + url)).catch(() => olStatus('이 링크를 보내 주세요: ' + url));
+};
 $('clearGhostBtn').onclick = () => {
   ghost = null; bestLap = null; store.del(GHOST_KEY(T.id)); store.del(LAP_KEY(T.id));
   $('rDetail').innerHTML += '<br>이 트랙 고스트를 지웠어요.'; $('againBtn').textContent = '다시 하기';
@@ -2656,7 +3031,7 @@ addEventListener('resize', () => {
 
 if (new URLSearchParams(location.search).has('debug')) window.G = { V, S, E, input, step, reset, respawn, H, selectTrack, startGame, toMenu, applyNight, gate,
   get T() { return T; }, get CR() { return CR; }, get ghost() { return ghost; },
-  camera, car, freeCam:false, backfire,
+  camera, car, freeCam:false, backfire, RACE, NET, openOnline, joinGame,
   render(ms = 16) { const now = performance.now(); if (S.mode === 'play') { updateEngine(ms / 1000); updateCrowd(ms / 1000, now); updateVisuals(ms / 1000, now); updateBackfire(ms / 1000, now); draw(scene); }
     else { updateGarageCam(ms / 1000, now); draw(garage); }
     audioUpdate(ms / 1000); return AU.ctx ? AU.ctx.state : 'no-audio'; } };
@@ -2665,6 +3040,7 @@ buildWorld();
 $('hTrack').textContent = T.name;
 pickColor(SET.color, (LIVERIES.find(l => l[1].toLowerCase() === SET.color.toLowerCase()) || [])[0]);
 refreshMenu();
+{ const rc = new URLSearchParams(location.search).get('room'); if (rc && /^[A-Z0-9]{3,8}$/i.test(rc)) { SET.mode = 'online'; if (T.id !== 'B') selectTrack('B'); refreshMenu(); openOnline(rc.toUpperCase()); } }
 layoutMini(); layoutGauge();
 garage.add(car.g); M.body.envMapIntensity = 1;
 requestAnimationFrame(frame);
