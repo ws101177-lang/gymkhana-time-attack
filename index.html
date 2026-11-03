@@ -2695,12 +2695,37 @@ function raceStep(dt) {
   }
 }
 // 화면 갱신: 상대 차 위치(온라인은 받은 위치로 부드럽게 따라감), 순위표
+// 온라인 상대 차: 받은 위치(보낸 시각 포함)를 쌓아 두고, 0.18초 전 시점을 앞뒤 두 위치 사이로 부드럽게 이어 그림.
+// 소식이 잠깐 끊기면 마지막 속도·방향으로 0.4초까지 앞으로 이어 감. 늦게 도착한 옛날 위치는 버림
+const NET_DELAY = 180;
+function remoteRecv(o, d) {
+  const b = o.buf || (o.buf = []), now = performance.now();
+  if (typeof d.t !== 'number' || (b.length && d.t <= b[b.length - 1].t)) return;
+  b.push({ t:d.t, x:d.x, z:d.z, h:d.h, v:d.v }); if (b.length > 40) b.shift();
+  // 상대 시계와 내 시계 차이: 가장 빨리 도착한 메시지 기준(전송 지연이 들쭉날쭉해도 흔들리지 않게)
+  const off = now - d.t, offs = o.offs || (o.offs = []);
+  offs.push(off); if (offs.length > 60) offs.shift();
+  o.off = Math.min(...offs);
+  o.p = d.p; o.v = d.v; o.fin = d.fin;
+}
+function remoteInterp(o, now) {
+  const b = o.buf; if (!b || !b.length) return;
+  const rt = now - o.off - NET_DELAY;
+  let i = b.length - 1;
+  while (i > 0 && b[i - 1].t > rt) i--;
+  const a = b[Math.max(0, i - 1)], c = b[i];
+  if (rt >= c.t) {                                                      // 새 소식이 아직 안 옴: 마지막 상태로 조금 앞으로
+    const e = Math.min(400, rt - c.t) / 1000;
+    o.x = c.x + Math.sin(c.h) * c.v * e; o.z = c.z + Math.cos(c.h) * c.v * e; o.h = c.h;
+  } else if (rt <= a.t || a === c) { o.x = a.x; o.z = a.z; o.h = a.h; }
+  else {
+    const f = (rt - a.t) / (c.t - a.t), dh = Math.atan2(Math.sin(c.h - a.h), Math.cos(c.h - a.h));
+    o.x = a.x + (c.x - a.x) * f; o.z = a.z + (c.z - a.z) * f; o.h = a.h + dh * f;
+  }
+}
 function raceVisuals(dt, now) {
   for (const o of RACE.opps) {
-    if (o.remote) {
-      const k = Math.min(1, dt * 12), dh = Math.atan2(Math.sin(o.net.h - o.h), Math.cos(o.net.h - o.h));
-      o.x += (o.net.x - o.x) * k; o.z += (o.net.z - o.z) * k; o.h += dh * k; o.p = o.net.p; o.v = o.net.v; o.fin = o.net.fin;
-    }
+    if (o.remote) remoteInterp(o, now);
     o.g.position.set(o.x, 0, o.z); o.g.rotation.y = o.h;
   }
   if (now - RACE.hudAt < 200) return;
@@ -2836,7 +2861,7 @@ async function joinGame(code, asHost, name) {
     renderPlayers(); announce();
   };
   go.onMessage = (d, { peerId }) => { if (peerId === NET.hostId && Array.isArray(d.order)) beginOnlineRace(d.order); };
-  st.onMessage = (d, { peerId }) => { const o = RACE.opps.find(o => o.id === peerId); if (o && d) Object.assign(o.net, d); };
+  st.onMessage = (d, { peerId }) => { const o = RACE.opps.find(o => o.id === peerId); if (o && d) remoteRecv(o, d); };
   $('olHome').classList.add('hidden'); $('olRoom').classList.remove('hidden');
   history.replaceState(null, '', `${location.pathname}?room=${code}`);
   renderPlayers(); announce();
@@ -2876,9 +2901,9 @@ function beginOnlineRace(order) {
 }
 // 내 상태를 초당 약 15번 보냄
 function netSend(now) {
-  if (!RACE.online || !NET.act || now - NET.sendAt < 100) return;
+  if (!RACE.online || !NET.act || now - NET.sendAt < 66) return;
   NET.sendAt = now;
-  NET.act.st.send({ x:+V.x.toFixed(2), z:+V.z.toFixed(2), h:+V.h.toFixed(3), v:+Math.max(0, V.vx).toFixed(1), p:+RACE.p.toFixed(1), fin:RACE.fin });
+  NET.act.st.send({ t:Math.round(now), x:+V.x.toFixed(2), z:+V.z.toFixed(2), h:+V.h.toFixed(3), v:+Math.max(0, V.vx).toFixed(1), p:+RACE.p.toFixed(1), fin:RACE.fin });
 }
 
 // ---------- 메뉴 · 화면 전환 ----------
@@ -3103,7 +3128,7 @@ addEventListener('resize', () => {
 
 if (new URLSearchParams(location.search).has('debug')) window.G = { V, S, E, input, step, reset, respawn, H, selectTrack, startGame, toMenu, applyNight, gate,
   get T() { return T; }, get CR() { return CR; }, get ghost() { return ghost; },
-  camera, car, freeCam:false, backfire, RACE, NET, openOnline, joinGame, AU,
+  camera, car, freeCam:false, backfire, RACE, NET, openOnline, joinGame, AU, remoteRecv, remoteInterp,
   render(ms = 16) { const now = performance.now(); if (S.mode === 'play') { updateEngine(ms / 1000); updateCrowd(ms / 1000, now); updateVisuals(ms / 1000, now); updateBackfire(ms / 1000, now); draw(scene); }
     else { updateGarageCam(ms / 1000, now); draw(garage); }
     audioUpdate(ms / 1000); return AU.ctx ? AU.ctx.state : 'no-audio'; } };
