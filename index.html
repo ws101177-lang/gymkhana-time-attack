@@ -1695,8 +1695,6 @@ function buildCar() {
     rod([s * .12, .38, -.8], [s * .23, .32, -1.2], M.chrome, .022);
   });
   part(new THREE.CylinderGeometry(.025, .03, .08, 14).rotateX(Math.PI / 2), M.chrome, EXHAUST.x, EXHAUST.y, EXHAUST.z + .04);
-  // 미러
-  [1, -1].forEach(s => { rod([s * .22, .64, .1], [s * .36, .76, .1], M.black, .008); const mr = part(new THREE.SphereGeometry(1, 16, 10), M.black, s * .38, .77, .1); mr.scale.set(.06, .035, .02); });
 
   // 바닥판(카본, 둥근 모서리, 파란 테두리). 실차에는 리어 디퓨저가 없음
   {
