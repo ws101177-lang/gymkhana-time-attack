@@ -150,6 +150,7 @@
   #mini { border-radius:10px; }
   body.ui-off .tower, body.ui-off #mini, body.ui-off .tool:not(#uiBtn), body.ui-off #cluster, body.ui-off #driftTag { visibility:hidden; }
   body.ui-off .btn { opacity:.35; }
+  body.onboard #cluster { display:none; }
   #cluster { position:fixed; left:50%; bottom:calc(8px + env(safe-area-inset-bottom)); transform:translateX(-50%); }
   @media (pointer:coarse) and (orientation:portrait) { #cluster { bottom:calc(168px + env(safe-area-inset-bottom)); } }
 
@@ -1610,6 +1611,36 @@ const EXHAUST = new THREE.Vector3(.23, .5, -1.27);
 M.frame = new THREE.MeshStandardMaterial({ color:0x17181b, roughness:.35, metalness:.6 });   // 검정 도장 강관 프레임
 M.gold = new THREE.MeshStandardMaterial({ color:0xb8893a, roughness:.3, metalness:.9 });     // 휠 센터, 댐퍼
 
+// 콕핏: 대시 디지털 계기판(실시간 기어·속도·회전수·랩타임), 초록 변속 LED, 버터플라이 핸들의 구멍 뚫린 알루미늄 판
+const dashCanvas = document.createElement('canvas'); dashCanvas.width = 256; dashCanvas.height = 160;
+const dashTex = new THREE.CanvasTexture(dashCanvas); dashTex.colorSpace = THREE.SRGBColorSpace;
+M.screen = new THREE.MeshBasicMaterial({ map:dashTex });
+M.led = new THREE.MeshStandardMaterial({ color:0x0a3010, emissive:0x22ff55, emissiveIntensity:.2 });
+M.kill = paint(0xd81e1e, { emissive:0x400000 });
+M.hub = new THREE.MeshStandardMaterial({ color:0x9a5a3a, roughness:.3, metalness:.85 });
+M.plate = new THREE.MeshStandardMaterial({ roughness:.35, metalness:.75, map:canvasTex(256, 128, (c, w, h) => {
+  c.fillStyle = '#c4c8ce'; c.fillRect(0, 0, w, h);
+  c.fillStyle = '#2a2c30';
+  [[40, 30], [216, 30], [40, 98], [216, 98]].forEach(([x, y]) => { c.beginPath(); c.arc(x, y, 9, 0, 7); c.fill(); });
+  [[78, 64], [178, 64]].forEach(([x, y]) => { c.beginPath(); c.roundRect(x - 18, y - 30, 36, 60, 10); c.fill(); });
+  c.strokeStyle = '#8d9198'; c.lineWidth = 3; c.strokeRect(2, 2, w - 4, h - 4);
+}) });
+function drawDash(gear, kmh, rpm, t) {
+  const c = dashCanvas.getContext('2d'), w = 256, h = 160;
+  c.fillStyle = '#070b14'; c.fillRect(0, 0, w, h);
+  c.fillStyle = '#1b2a48'; c.fillRect(0, 0, w, 22);
+  const f = clamp(rpm / RPM_MAX, 0, 1);
+  c.fillStyle = f > .88 ? '#ff3b30' : f > .7 ? '#ffd400' : '#39d353'; c.fillRect(4, 6, (w - 8) * f, 10);
+  c.fillStyle = '#e8eef8'; c.textAlign = 'center'; c.textBaseline = 'middle';
+  c.font = '900 92px "Titillium Web", Arial'; c.fillText(gear, w / 2, 92);
+  c.textAlign = 'left'; c.font = '700 13px Arial'; c.fillStyle = '#7f8ba3';
+  c.fillText('KM/H', 10, 40); c.fillText('RPM', 10, 100); c.textAlign = 'right'; c.fillText('LAP', w - 10, 40); c.fillText('GEAR', w - 10, 100);
+  c.font = '900 26px Arial'; c.fillStyle = '#e8eef8';
+  c.textAlign = 'left'; c.fillText(kmh, 10, 64); c.fillText((rpm / 1000).toFixed(1), 10, 124);
+  c.textAlign = 'right'; c.fillText(t, w - 10, 64); c.fillText(gear, w - 10, 124);
+  dashTex.needsUpdate = true;
+}
+drawDash('N', 0, IDLE, '0.00');
 function buildCar() {
   const g = new THREE.Group();
   const part = (geo, mat, x = 0, y = 0, z = 0, rx = 0, parent = g) => {
@@ -1702,8 +1733,22 @@ function buildCar() {
   part(new THREE.BoxGeometry(.34, .24, .2), M.suit, 0, .6, -.26);
   [1, -1].forEach(s => part(new THREE.BoxGeometry(.05, .02, .22), M.belt, s * .08, .735, -.25));
   const hans = part(new THREE.TorusGeometry(.09, .03, 8, 18), M.belt, 0, .74, -.26); hans.rotation.x = Math.PI / 2;
-  [1, -1].forEach(s => rod([s * .16, .68, -.24], [s * .1, .65, .06], M.suit, .034));
-  const wheel = part(new THREE.TorusGeometry(.1, .016, 8, 22), M.black, 0, .66, .09); wheel.rotation.x = -.3;
+  [1, -1].forEach(s => rod([s * .16, .68, -.24], [s * .115, .645, .05], M.suit, .03));
+  // 대시: 핸들 앞 검정 카본 상자. 가운데 디지털 계기판과 초록 LED 두 개, 오른쪽에 빨간 킬 스위치와 은색 버튼 두 개
+  const dash = new THREE.Group(); dash.position.set(0, .66, .2); dash.rotation.x = .3; g.add(dash);
+  part(new THREE.BoxGeometry(.44, .13, .07), M.carbon, 0, 0, 0, 0, dash);
+  part(new THREE.BoxGeometry(.15, .1, .012), M.black, 0, 0, -.038, 0, dash);
+  const scr = part(new THREE.PlaneGeometry(.13, .08), M.screen, 0, 0, -.0445, 0, dash); scr.rotation.y = Math.PI; scr.castShadow = false;
+  [-.012, .012].forEach(x => part(new THREE.SphereGeometry(.0055, 10, 8), M.led, x, .052, -.04, 0, dash));
+  part(new THREE.CylinderGeometry(.016, .016, .014, 18).rotateX(Math.PI / 2), M.kill, -.14, .025, -.04, 0, dash);   // 드라이버 기준 오른쪽
+  [-.12, -.16].forEach(x => part(new THREE.CylinderGeometry(.009, .009, .01, 14).rotateX(Math.PI / 2), M.steel, x, -.022, -.039, 0, dash));
+  // 핸들: 작은 직사각형 버터플라이 핸들. 구멍 뚫린 알루미늄 판, 구리색 퀵릴리스 허브, 양옆 검정 그립 (조향에 따라 돎)
+  const sw = new THREE.Group(); sw.position.set(0, .645, .07); sw.rotation.x = .3; g.add(sw);
+  const plate = part(new THREE.BoxGeometry(.2, .1, .012), [M.steel, M.steel, M.steel, M.steel, M.steel, M.plate], 0, 0, 0, 0, sw);
+  part(new THREE.CylinderGeometry(.03, .034, .03, 20).rotateX(Math.PI / 2), M.hub, 0, 0, -.018, 0, sw);
+  part(new THREE.CircleGeometry(.006, 12), M.led, 0, .005, -.034, 0, sw).rotation.y = Math.PI;
+  [1, -1].forEach(s => { part(new THREE.CylinderGeometry(.019, .019, .13, 14), M.black, s * .115, 0, -.006, 0, sw); part(new THREE.BoxGeometry(.03, .015, .03), M.black, s * .1, -.055, -.004, 0, sw); });
+  rod([0, .645, .09], [0, .64, .17], M.steel, .012);
   const helmet = new THREE.Group(); helmet.position.set(0, .86, -.25); g.add(helmet);
   part(new THREE.SphereGeometry(.13, 28, 20), M.helmet, 0, 0, 0, 0, helmet);
   part(new THREE.SphereGeometry(.133, 28, 10, Math.PI / 2 - .85, 1.7, Math.PI / 2 - .32, .42), M.visor, 0, 0, 0, 0, helmet);
@@ -1743,7 +1788,7 @@ function buildCar() {
   const sh = new THREE.Mesh(new THREE.PlaneGeometry(1.75, 3.4), new THREE.MeshBasicMaterial({ map:shadowTex, transparent:true, depthWrite:false }));
   sh.rotation.x = -Math.PI / 2; sh.position.set(0, .012, .05); sh.renderOrder = -1; g.add(sh);
   g.rotation.order = 'YXZ';
-  return { g, wheels, helmet, shadow:sh };
+  return { g, wheels, helmet, shadow:sh, steer:sw };
 }
 
 // 최적화: 차 한 대가 부품 수백 개라 그리기 호출이 많음. 움직이지 않는 부품을 재질별로 한 덩어리씩 합침
@@ -1771,7 +1816,7 @@ function optimizeCar(c, ghost) {
   const pivots = new Set(c.wheels.map(w => w.pivot));
   const inWheel = o => { for (let p = o.parent; p; p = p.parent) if (pivots.has(p)) return true; return false; };
   if (ghost) { c.g.traverse(o => { if (o.isMesh && o !== c.shadow) o.material = ghostMat; }); mergeMeshes(c.g, o => o === c.shadow); return c; }
-  const inHelmet = o => { for (let p = o.parent; p; p = p.parent) if (p === c.helmet) return true; return false; };
+  const inHelmet = o => { for (let p = o.parent; p; p = p.parent) if (p === c.helmet || p === c.steer) return true; return false; };   // 헬멧·핸들은 움직여야 해서 따로
   mergeMeshes(c.g, o => o === c.shadow || inWheel(o) || inHelmet(o));          // 헬멧은 따로 둠 (온보드 시점에서 숨김)
   c.wheels.forEach(w => { mergeMeshes(w.spin); mergeMeshes(w.pivot, o => o.parent !== w.pivot); });
   return c;
@@ -2238,13 +2283,14 @@ function updateCamera(dt) {
   }
   const sp = Math.hypot(V.vx, V.vy);
   car.helmet.visible = S.cam !== 'onboard' || S.done;
+  document.body.classList.toggle('onboard', S.cam === 'onboard' && !S.done);
   // 화면 아래 계기판에 차가 가리지 않게 그림 전체를 조금 위로 올림
   camera.setViewOffset(innerWidth, innerHeight, 0, S.cam === 'onboard' ? 0 : innerHeight * .09, innerWidth, innerHeight);
   if (S.cam === 'onboard') {
     camera.fov = 78 + sp * .15; camera.near = .05;
     // 드라이버 눈높이(헬멧 자리). 헬멧은 숨기고, 스노클·롤후프는 머리 뒤쪽이라 시야를 가리지 않음
-    camera.position.set(V.x - fx * 0.14, .93, V.z - fz * 0.14);
-    camera.lookAt(V.x + fx * 8, 0.35, V.z + fz * 8);
+    camera.position.set(V.x - fx * 0.36, .98, V.z - fz * 0.36);
+    camera.lookAt(V.x + fx * 5, -.25, V.z + fz * 5);
   } else {
     const portrait = camera.aspect < 1;
     camera.near = .1;
@@ -2577,6 +2623,13 @@ function updateVisuals(dt, now) {
   car.g.rotation.set(-V.pitch, V.h, V.roll);
   V.spin += V.v * dt / 0.23;
   car.wheels.forEach(w => { w.spin.rotation.x = V.spin; if (w.front) w.pivot.rotation.y = V.steer; });
+  car.steer.rotation.z = -V.steer * 3.2;                                // 핸들은 앞바퀴 조향각의 약 3배로 돎
+  M.led.emissiveIntensity = E.rpm > 9000 ? 3 : .2;                      // 변속 시점에 초록 LED가 켜짐
+  if (now - (car.dashAt || 0) > 100) {
+    car.dashAt = now;
+    const kmh = Math.round(Math.hypot(V.vx, V.vy) * 3.6);
+    drawDash(E.gear < 0 ? 'R' : kmh < 1 && !input.up ? 'N' : String(E.gear), kmh, E.rpm, (S.running || S.done ? S.t : 0).toFixed(2));
+  }
   M.rain.emissiveIntensity = (SET.night ? 3 : 1.5) * (input.down && V.vx > .5 ? 2.2 : 1);
   placeGhost();
 
