@@ -255,7 +255,7 @@
     </dl>
     <p class="note">※ 게임 속 설정값</p>
     <label class="nick">닉네임 <input id="nickIn" maxlength="12" autocomplete="off"></label>
-    <div class="seg modeSeg" id="modeSeg"><button data-m="ta">타임어택</button><button data-m="tour">토너먼트</button><button data-m="race">AI 레이스 8대</button><button data-m="online">온라인</button></div>
+    <div class="seg modeSeg" id="modeSeg"><button data-m="ta">타임어택</button><button data-m="race">AI 레이스 8대</button><button data-m="online">온라인</button></div>
     <div class="tracks">
       <button class="trk" data-t="A"><canvas width="240" height="104"></canvas><b>A · 짐카나</b><span>콘 코스 1바퀴</span></button>
       <button class="trk" data-t="B"><canvas width="240" height="104"></canvas><b>B · 모나코 시가지</b><span>3바퀴 · 벽 주의</span></button>
@@ -331,16 +331,6 @@
   </div>
 </div>
 
-<div id="tour" class="overlay hidden">
-  <div class="card wide" style="max-width:740px">
-    <div class="eyebrow">GYMKHANA TOURNAMENT · 코스1 | 배리어 | 코스2</div>
-    <div class="bracket num" id="tourBody"></div>
-    <p class="detail" id="tourMsg"></p>
-    <div class="btnRow"><button class="primary" id="tourGo">경기 시작</button><button class="secondary" id="tourMenu">메뉴</button></div>
-    <p class="tiny">대회 규정대로 같은 코스 두 개에서 동시에 출발해요. 파일런 1개당 +1초, 벌칙을 더한 기록이 빠른 쪽이 다음 라운드로 올라가요. 나는 코스1, 상대는 코스2.</p>
-  </div>
-</div>
-
 <div id="online" class="overlay hidden">
   <div class="card wide">
     <div class="eyebrow">ONLINE · 같은 링크로 들어온 사람끼리</div>
@@ -352,6 +342,8 @@
     <div id="olRoom" class="hidden">
       <h2 id="olRoomName" style="margin:6px 0 2px"></h2>
       <p class="detail">방 코드 <b id="olCode"></b> · <button class="link" id="olCopy" style="margin:0">초대 링크 복사</button></p>
+      <div class="detail" style="margin:0 0 4px">트랙 (방장이 골라요)</div>
+      <div class="seg" id="olTrack" style="margin-bottom:10px"><button data-t="A">A · 짐카나 (코스 나란히)</button><button data-t="B">B · 모나코 3바퀴</button></div>
       <ul id="olPlayers" class="players"></ul>
       <div class="detail" style="margin:0 0 4px">내 차 색상</div>
       <div class="olColors" id="olColors"></div>
@@ -405,6 +397,7 @@ const store = {
 };
 const SET = Object.assign({ track:'A', color:'#1f4fd6', night:false, music:true, sfx:true, muted:false, mode:'ta', nick:'PLAYER' + (10 + Math.random() * 89 | 0) }, store.get(SET_KEY, {}));
 const saveSet = () => store.set(SET_KEY, SET);
+if (SET.mode === 'tour') SET.mode = 'ta';                              // 예전 토너먼트 설정은 타임어택으로
 
 // ---------- 트랙 (지도 좌표: x 동쪽, y 북쪽, 단위 m) ----------
 function builder() {
@@ -793,13 +786,15 @@ function buildWorld() {
   world = new THREE.Group(); scene.add(world);
   NIGHT_HOOKS = []; CR = null;
   grass.visible = !T.street;
-  T.dxs = T.id === 'A' && SET.mode === 'tour' ? [0, TWIN_DX] : [0];   // 토너먼트: 같은 코스를 오른쪽에 하나 더 (코스1 | 배리어 | 코스2)
+  // 온라인 짐카나: 참가 순서대로 코스를 나란히 (코스1 | 배리어 | 코스2 …). 내 코스가 늘 0번 위치
+  T.dxs = T.id === 'A' && RACE.online && RACE.order ? RACE.order.map((_, k) => (k - RACE.order.indexOf(NET.self)) * TWIN_DX) : [0];
   if (T.street) buildStreet(); else buildLot();
   buildCones();
   T.dxs.forEach(dx => buildGantry(dx));
   if (!T.street) {
     const keep = { per:T.per, cx:T.cx };
-    if (T.dxs.length > 1) { T.per = { ...T.per, x1:T.per.x1 + TWIN_DX }; T.cx += TWIN_DX / 2; }
+    const lo = Math.min(...T.dxs), hi = Math.max(...T.dxs);
+    if (T.dxs.length > 1) { T.per = { ...T.per, x0:T.per.x0 + lo, x1:T.per.x1 + hi }; T.cx += (lo + hi) / 2; }
     buildSurroundings();
     Object.assign(T, keep);
   }
@@ -811,10 +806,10 @@ function buildWorld() {
 
 // A: 넓은 주차장 아스팔트 위 콘 코스
 function buildLot() {
-  const per = T.per, extra = T.dxs[T.dxs.length - 1], sz = Math.max(per.x1 - per.x0 + extra, per.y1 - per.y0) + 120;
+  const per = T.per, lo = Math.min(...T.dxs), hi = Math.max(...T.dxs), sz = Math.max(per.x1 - per.x0 + hi - lo, per.y1 - per.y0) + 120;
   const lot = new THREE.Mesh(new THREE.PlaneGeometry(sz, sz),
     new THREE.MeshStandardMaterial({ map:asphaltTex(sz / 9), bumpMap:asphaltTex(sz / 9), bumpScale:1.6, roughness:.92, envMapIntensity:.25 }));
-  lot.rotation.x = -Math.PI / 2; lot.position.set(T.cx + extra / 2, 0, T.cz); lot.receiveShadow = true; world.add(lot);
+  lot.rotation.x = -Math.PI / 2; lot.position.set(T.cx + (lo + hi) / 2, 0, T.cz); lot.receiveShadow = true; world.add(lot);
   // 코스마다 한 벌씩: 옮긴 그룹 안에 만들어서 코스2는 오른쪽으로 TWIN_DX만큼
   const top = world;
   T.dxs.forEach(dx => { world = new THREE.Group(); world.position.x = dx; top.add(world); buildLotCourse(per); });
@@ -1629,9 +1624,9 @@ function buildCar() {
     m.castShadow = true; g.add(m); return m;
   };
 
-  // 모노코크 + 노즈: 실차처럼 높고 넓은 총알형 노즈 (앞이 둥글게 막힘), 콕핏에서 조금 낮아짐
-  part(loft([[1.5, .07, .05, .05, .37], [1.47, .17, .12, .1, .375], [1.41, .23, .16, .13, .38], [1.29, .27, .19, .15, .39], [1.06, .29, .21, .17, .4],
-    [.76, .3, .22, .2, .4], [.46, .31, .23, .24, .39], [.2, .32, .2, .27, .39], [-.1, .32, .17, .28, .39], [-.35, .32, .16, .28, .39],
+  // 모노코크 + 노즈: 실차처럼 앞이 살짝 뾰족한 미들 노즈 (끝이 낮고 좁다가 뒤로 갈수록 높고 넓어짐), 콕핏에서 조금 낮아짐
+  part(loft([[1.56, .03, .025, .025, .3], [1.52, .09, .06, .055, .31], [1.44, .16, .11, .095, .33], [1.3, .22, .155, .13, .355], [1.08, .27, .19, .16, .375],
+    [.78, .3, .215, .19, .39], [.46, .31, .23, .24, .39], [.2, .32, .2, .27, .39], [-.1, .32, .17, .28, .39], [-.35, .32, .16, .28, .39],
     [-.55, .27, .14, .26, .37], [-.7, .2, .12, .22, .35]], { nTop:2.4, nBot:3.6, ring:40 }), tubMat);
   // 콕핏 구멍(검정)과 테두리
   const pit = part(new THREE.CylinderGeometry(1, 1, .02, 40), M.dark, 0, .56, -.12); pit.scale.set(.22, 1, .36);
@@ -1645,7 +1640,7 @@ function buildCar() {
   });
   // 노즈 옆 은색 트러스 브래킷(프론트윙 지지대)
   [1, -1].forEach(s => {
-    const A = [s * .3, .12, 1.38], B = [s * .3, .45, .98], C = [s * .3, .17, .92], D = [s * .3, .3, 1.15];
+    const A = [s * .26, .12, 1.4], B = [s * .29, .44, .98], C = [s * .29, .17, .92], D = [s * .27, .29, 1.15];
     rod(A, B, M.steel, .01); rod(A, C, M.steel, .01); rod(C, B, M.steel, .01); rod(C, D, M.steel, .008); rod(D, [s * .3, .12, 1.2], M.steel, .008);
   });
   // 롤후프(검정 강관)·프레임, 머리받이 상자, 머리 위 흡기 스노클
@@ -1672,7 +1667,7 @@ function buildCar() {
   // 미러
   [1, -1].forEach(s => { rod([s * .22, .64, .1], [s * .36, .76, .1], M.black, .008); const mr = part(new THREE.SphereGeometry(1, 16, 10), M.black, s * .38, .77, .1); mr.scale.set(.06, .035, .02); });
 
-  // 바닥판(카본, 둥근 모서리, 파란 테두리)과 디퓨저
+  // 바닥판(카본, 둥근 모서리, 파란 테두리). 실차에는 리어 디퓨저가 없음
   {
     const s = new THREE.Shape(), hw = .6, f = .62, b = -1.18, r = .12;
     s.moveTo(-hw + r, f); s.lineTo(hw - r, f); s.quadraticCurveTo(hw, f, hw, f - r); s.lineTo(hw, b + r); s.quadraticCurveTo(hw, b, hw - r, b);
@@ -1680,8 +1675,6 @@ function buildCar() {
     const fl = new THREE.ExtrudeGeometry(s, { depth:.02, bevelEnabled:true, bevelThickness:.006, bevelSize:.006, bevelSegments:2 });
     fl.rotateX(Math.PI / 2); part(fl, M.carbon, 0, .085, 0);
     [1, -1].forEach(sx => part(new THREE.BoxGeometry(.012, .03, 1.5), M.body, sx * .606, .075, -.3));
-    part(new THREE.BoxGeometry(.92, .015, .34), M.carbon, 0, .13, -1.3, -.32);
-    [-.3, -.1, .1, .3].forEach(x => part(new THREE.BoxGeometry(.01, .12, .3), M.carbon, x, .12, -1.28, -.32));
   }
   // 프론트 윙: 넓고 낮은 주 날개(파란 앞날), 바깥쪽 계단식 플랩, 파랑·흰 옆판
   part(wingGeo(.4, .03, 1.42, .02), M.black, 0, .07, 1.78);
@@ -1778,7 +1771,8 @@ function optimizeCar(c, ghost) {
   const pivots = new Set(c.wheels.map(w => w.pivot));
   const inWheel = o => { for (let p = o.parent; p; p = p.parent) if (pivots.has(p)) return true; return false; };
   if (ghost) { c.g.traverse(o => { if (o.isMesh && o !== c.shadow) o.material = ghostMat; }); mergeMeshes(c.g, o => o === c.shadow); return c; }
-  mergeMeshes(c.g, o => o === c.shadow || inWheel(o));
+  const inHelmet = o => { for (let p = o.parent; p; p = p.parent) if (p === c.helmet) return true; return false; };
+  mergeMeshes(c.g, o => o === c.shadow || inWheel(o) || inHelmet(o));          // 헬멧은 따로 둠 (온보드 시점에서 숨김)
   c.wheels.forEach(w => { mergeMeshes(w.spin); mergeMeshes(w.pivot, o => o.parent !== w.pivot); });
   return c;
 }
@@ -1864,9 +1858,8 @@ function reset() {
   hud.delta.classList.add('hidden');
   $('result').classList.add('hidden');
   setLights(0); $('lights').classList.toggle('hidden', S.mode !== 'play');
-  if (RACE.on && T.street && S.mode === 'play') setupRace(); else clearOpps();
-  if (TOUR.on && S.mode === 'play') setupTourMatch(); else clearTourOpp();
-  $('standings').classList.toggle('hidden', !RACE.on && !TOUR.on);
+  if (RACE.on && S.mode === 'play') setupRace(); else clearOpps();
+  $('standings').classList.toggle('hidden', !RACE.on);
   updateNextPath();
   camInit = true;
 }
@@ -1911,9 +1904,8 @@ function finish(dnf) {
   showHint(''); S.off = false;
   const total = eff();
   let record = false;
-  if (RACE.on) RACE.fin = dnf ? null : S.t;
-  const tr = TOUR.on ? tourFinish(dnf) : null;
-  if (!RACE.on && !TOUR.on && !dnf && (!ghost || total < ghost.total)) {
+  if (RACE.on) RACE.fin = dnf ? null : T.street ? S.t : eff();   // 짐카나는 파일런 벌칙 포함 기록
+  if (!RACE.on && !dnf && (!ghost || total < ghost.total)) {
     ghost = { total, raw:S.t, pen:S.pen, frames:rec.f.map(v => Math.round(v * 100) / 100), splits:rec.splits };
     store.set(GHOST_KEY(T.id), ghost);
     record = true;
@@ -1940,16 +1932,6 @@ function finish(dnf) {
       $('rDetail').innerHTML = '* 표시는 아직 달리는 차의 예상 기록';
       $('rLaps').innerHTML = r.html;
       $('againBtn').textContent = RACE.online ? '방으로 돌아가기' : '다시 레이스';
-    }
-    if (tr) {
-      const o = TOUR.opp, ot = runTotal(tr.theirs);
-      $('rReason').textContent = `${ROUND_NAMES[tr.played]} · ${tr.won ? 'WIN' : 'LOSE'}`;
-      $('rTime').textContent = dnf ? 'DNF' : fmt(runTotal(tr.mine));
-      $('rDetail').innerHTML = `주행 ${fmt(S.t)} + 파일런 ${S.pen}개 × 1초 · 규정 점수 <b>${tr.pts.toFixed(1)}점</b>` +
-        `<br><span style="opacity:.7">점수 = 150 × ((1.45 × Tmin ÷ 내 기록) − 1) ÷ 0.45 + 100 · Tmin ${fmt(tr.tmin)}</span>`;
-      $('rLaps').innerHTML = `<tr class="${tr.won ? 'best' : ''}"><td>코스1 · ${esc(SET.nick || 'YOU')}</td><td>${dnf ? 'DNF' : fmt(runTotal(tr.mine))}</td></tr>` +
-        `<tr class="${tr.won ? '' : 'best'}"><td>코스2 · ${esc(o.name)}${tr.theirs.pen ? ` (파일런 ${tr.theirs.pen})` : ''}</td><td>${fmt(ot)}</td></tr>`;
-      $('againBtn').textContent = TOUR.champ ? '우승! 대진표 보기' : tr.won ? `다음 경기 (${ROUND_NAMES[TOUR.round]})` : '대진표 보기';
     }
     $('result').classList.remove('hidden');
   }, 2900);
@@ -2125,8 +2107,7 @@ function step(dt) {
     if (Math.abs(V.vx) > 3 && Math.random() < .25) puff(V.x + nx * .7, V.z + nz * .7);
     if (Math.abs(V.vx) > 3 && now - (S.scrapeAt || 0) > 160) { S.scrapeAt = now; sfx.scrape(); }   // 긁힘 소리는 0.16초에 한 번까지
   }
-  if (RACE.on && T.street) raceStep(dt);
-  if (TOUR.on) tourStep(dt);
+  if (RACE.on) raceStep(dt);
   const v = V.vx;
   marks();
 
@@ -2256,14 +2237,17 @@ function updateCamera(dt) {
     return;
   }
   const sp = Math.hypot(V.vx, V.vy);
+  car.helmet.visible = S.cam !== 'onboard' || S.done;
   // 화면 아래 계기판에 차가 가리지 않게 그림 전체를 조금 위로 올림
   camera.setViewOffset(innerWidth, innerHeight, 0, S.cam === 'onboard' ? 0 : innerHeight * .09, innerWidth, innerHeight);
   if (S.cam === 'onboard') {
-    camera.fov = 72 + sp * .15;
-    camera.position.set(V.x - fx * 0.95, 1.42, V.z - fz * 0.95);
-    camera.lookAt(V.x + fx * 7, 0.2, V.z + fz * 7);
+    camera.fov = 78 + sp * .15; camera.near = .05;
+    // 드라이버 눈높이(헬멧 자리). 헬멧은 숨기고, 스노클·롤후프는 머리 뒤쪽이라 시야를 가리지 않음
+    camera.position.set(V.x - fx * 0.14, .93, V.z - fz * 0.14);
+    camera.lookAt(V.x + fx * 8, 0.35, V.z + fz * 8);
   } else {
     const portrait = camera.aspect < 1;
+    camera.near = .1;
     camera.fov = (portrait ? 68 : 60) + sp * .22;                      // 빠를수록 시야를 조금 넓혀 속도감
     if (camInit) { camH = V.h; camInit = false; }
     camH += Math.atan2(Math.sin(V.h - camH), Math.cos(V.h - camH)) * Math.min(1, dt * 5);
@@ -2342,7 +2326,6 @@ function drawMini(now) {
     c.fillStyle = o.color; c.strokeStyle = '#fff'; c.lineWidth = 1.4; c.beginPath(); c.arc(u, v, T.road ? 4.6 : 3.6, 0, 7); c.fill(); c.stroke();
     if (o.remote) { c.lineWidth = 3; c.strokeStyle = 'rgba(0,0,0,.7)'; c.strokeText(o.name, u + 7, v); c.fillStyle = '#fff'; c.fillText(o.name, u + 7, v); }
   }
-  if (TOUR.opp) { const o = TOUR.opp, [u, v] = toMini(o.x - TWIN_DX, o.z); c.fillStyle = o.color; c.strokeStyle = '#fff'; c.lineWidth = 1.4; c.beginPath(); c.arc(u, v, 3.8, 0, 7); c.fill(); c.stroke(); }
   if (ghostCar.g.visible) { const [u, v] = toMini(ghostCar.g.position.x, ghostCar.g.position.z); c.fillStyle = '#8fdcff'; c.beginPath(); c.arc(u, v, 3.2, 0, 7); c.fill(); }
   const [u, v] = toMini(V.x, V.z), hx = Math.sin(V.h), hz = Math.cos(V.h), r = T.road ? 8 : 6.5;
   c.fillStyle = '#e10600'; c.strokeStyle = '#fff'; c.lineWidth = 1.5; c.beginPath();
@@ -2573,7 +2556,7 @@ function setMusic() {
 
 // ---------- 화면 갱신 ----------
 function placeGhost() {
-  const show = ghost && S.mode === 'play' && !RACE.on && !TOUR.on;
+  const show = ghost && S.mode === 'play' && !RACE.on;
   ghostCar.g.visible = !!show;
   if (!show) return;
   const f = ghost.frames, n = f.length / 4;
@@ -2625,8 +2608,7 @@ function updateVisuals(dt, now) {
   sun.position.set(V.x + sd.x * 60, sd.y * 60, V.z + sd.z * 60); sun.target.position.set(V.x, 0, V.z);
 
   hud.time.textContent = fmt(S.running || S.done ? S.t : 0);
-  if (TOUR.on) tourVisuals(now);
-  else if (!RACE.on) hud.lap.textContent = `LAP ${Math.min(S.lap, T.laps)}/${T.laps}`;
+  if (!RACE.on) hud.lap.textContent = `LAP ${Math.min(S.lap, T.laps)}/${T.laps}`;
   else raceVisuals(dt, now);
   hud.pen.textContent = S.pen ? `${S.pen} (+${S.pen * CONE_PENALTY}s)` : '0';
   hud.cp.textContent = T.closed ? `${S.k ? (S.k - 1) % T.CP.length + 1 : 0}/${T.CP.length}` : `${Math.min(S.k, T.CP.length)}/${T.CP.length}`;
@@ -2757,6 +2739,14 @@ function setupRace() {
       makeOpp({ name:AI_NAMES[n], color:cols[n % cols.length], skill:.9 + (7 - i) * .012 + rand(-.015, .015) }, i); n++;
     }
   }
+  if (!T.street) {                                                      // 짐카나: 모두 자기 코스 출발선 뒤, 다른 사람은 옆 코스
+    RACE.opps.forEach(o => {
+      const k = RACE.order.indexOf(o.id); o.dx = (k - RACE.slot) * TWIN_DX;
+      Object.assign(o, { x:T.spawn.x, z:T.spawn.z, h:T.spawn.h, p:0, buf:null });
+    });
+    Object.assign(V, { x:T.spawn.x, z:T.spawn.z, h:T.spawn.h, ri:0 });
+    RACE.p = 0; RACE.lastC = 0; return;
+  }
   const gs = gridSlot(RACE.slot), q = posAt(gs.s, gs.lane);
   Object.assign(V, { x:q.x, z:q.z, h:q.h, ri:q.k });
   RACE.p = gs.p; RACE.lastC = T.cum[q.k];
@@ -2798,7 +2788,7 @@ function raceStep(dt) {
   for (const o of RACE.opps) {
     const ox = Math.sin(o.h), oz = Math.cos(o.h);
     for (const a of [.8, -.7]) for (const b of [.8, -.7]) {
-      const ax = V.x + fx * a, az = V.z + fz * a, bx = o.x + ox * b, bz = o.z + oz * b;
+      const ax = V.x + fx * a, az = V.z + fz * a, bx = o.x + (o.dx || 0) + ox * b, bz = o.z + oz * b;
       const dx = ax - bx, dz = az - bz, dd = Math.hypot(dx, dz);
       if (dd > 1.45 || dd < .001) continue;
       const nx = dx / dd, nz = dz / dd, push = 1.45 - dd;
@@ -2845,7 +2835,7 @@ function remoteInterp(o, now) {
 function raceVisuals(dt, now) {
   for (const o of RACE.opps) {
     if (o.remote) remoteInterp(o, now);
-    o.g.position.set(o.x, 0, o.z); o.g.rotation.y = o.h;
+    o.g.position.set(o.x + (o.dx || 0), 0, o.z); o.g.rotation.y = o.h;   // 짐카나는 옆 코스로 옮겨 그림
   }
   if (now - RACE.hudAt < 200) return;
   RACE.hudAt = now;
@@ -2868,14 +2858,15 @@ function raceResult() {
   const len = T.len;
   const rows = standings().map(r => ({ ...r, t:r.fin ?? S.t + Math.max(0, T.laps * len - r.p) / Math.max(8, r.v || 8), est:r.fin == null }));
   rows.sort((a, b) => a.t - b.t);
-  const pos = rows.findIndex(r => r.me) + 1;
-  return { pos, html:rows.map((r, i) => `<tr class="${r.me ? 'best' : ''}"><td>${i + 1}. ${esc(r.name)}</td><td>${i === 0 ? fmt(r.t) : '+' + (r.t - rows[0].t).toFixed(2)}${r.est ? ' *' : ''}</td></tr>`).join('') };
+  const pos = rows.findIndex(r => r.me) + 1, tmin = rows[0].t;
+  const pts = r => T.street || r.est ? '' : ` · ${gymPoints(r.t, tmin).toFixed(1)}점`;
+  return { pos, html:rows.map((r, i) => `<tr class="${r.me ? 'best' : ''}"><td>${i + 1}. ${esc(r.name)}</td><td>${i === 0 ? fmt(r.t) : '+' + (r.t - rows[0].t).toFixed(2)}${r.est ? ' *' : ''}${pts(r)}</td></tr>`).join('') };
 }
 
 // ---------- 온라인: 공개 MQTT 중계 서버(웹소켓)를 거쳐 메시지를 주고받음 ----------
 // 브라우저끼리 직접 잇는 방식(WebRTC)은 휴대폰 데이터·학교 와이파이처럼 공유기가 막는 곳에서 서로를 못 찾아서,
 // 모든 메시지를 중계 서버로 보냄. 서버 하나가 막혀도 만나도록 두 곳에 동시에 붙고, 겹쳐 받은 메시지는 버림
-const NET = { bus:null, lobby:null, ann:null, room:null, act:null, code:null, name:'', host:false, hostId:null,
+const NET = { track:'B', bus:null, lobby:null, ann:null, room:null, act:null, code:null, name:'', host:false, hostId:null,
   self:Math.random().toString(36).slice(2, 12), peers:{}, rooms:{}, started:false, sendAt:0, timer:0 };
 const NET_BASE = 'racing-arcade-yusae/v2/', BROKERS = ['wss://broker.emqx.io:8084/mqtt', 'wss://broker.hivemq.com:8884/mqtt'];
 async function netLib() {
@@ -2947,11 +2938,11 @@ async function joinLobby() {
   renderRooms();
 }
 function announce() {
-  if (NET.host && NET.code && NET.ann) NET.ann.send({ code:NET.code, name:NET.name, host:SET.nick, n:1 + Object.keys(NET.peers).length, racing:NET.started });
+  if (NET.host && NET.code && NET.ann) NET.ann.send({ code:NET.code, name:NET.name, host:SET.nick, n:1 + Object.keys(NET.peers).length, racing:NET.started, track:NET.track });
 }
 function renderRooms() {
   const now = Date.now(), list = Object.values(NET.rooms).filter(r => now - r.at < 7000 && r.code !== NET.code);
-  $('olList').innerHTML = list.length ? list.map(r => `<div class="room"><div><b>${esc(r.name)}</b><span>방장 ${esc(r.host)} · ${r.n}/8명${r.racing ? ' · 경기 중' : ''}</span></div>
+  $('olList').innerHTML = list.length ? list.map(r => `<div class="room"><div><b>${esc(r.name)}</b><span>${r.track === 'A' ? '짐카나' : '모나코'} · 방장 ${esc(r.host)} · ${r.n}/8명${r.racing ? ' · 경기 중' : ''}</span></div>
     <button class="primary" data-code="${esc(r.code)}" ${r.n >= 8 ? 'disabled' : ''}>참가</button></div>`).join('')
     : '<p class="tiny">열린 방을 찾는 중이에요… 없으면 방을 만들어 보세요. (같은 링크로 들어온 사람에게만 보여요)</p>';
   $('olList').querySelectorAll('button[data-code]').forEach(b => b.onclick = () => joinGame(b.dataset.code, false, ''));
@@ -2963,7 +2954,7 @@ async function joinGame(code, asHost, name) {
   const r = NET.room = joinRoom('r-' + code);
   const hi = r.makeAction('hi'), st = r.makeAction('st'), go = r.makeAction('go');
   NET.act = { hi, st, go };
-  const me = NET.me = () => ({ nick:SET.nick, color:SET.color, host:NET.host, name:NET.name });
+  const me = NET.me = () => ({ nick:SET.nick, color:SET.color, host:NET.host, name:NET.name, track:NET.track });
   r.onPeerJoin = id => {
     if (NET.host && Object.keys(NET.peers).length >= 7) return;    // 8명까지
     hi.send(me(), { target:id });
@@ -2976,10 +2967,10 @@ async function joinGame(code, asHost, name) {
   };
   hi.onMessage = (d, { peerId }) => {
     NET.peers[peerId] = { nick:String(d.nick || 'PLAYER').slice(0, 12), color:/^#[0-9a-f]{6}$/i.test(d.color) ? d.color : '#888888' };
-    if (d.host) { NET.hostId = peerId; NET.name = d.name || NET.name; }
+    if (d.host) { NET.hostId = peerId; NET.name = d.name || NET.name; if (d.track === 'A' || d.track === 'B') NET.track = d.track; }
     renderPlayers(); announce();
   };
-  go.onMessage = (d, { peerId }) => { if (peerId === NET.hostId && Array.isArray(d.order)) beginOnlineRace(d.order); };
+  go.onMessage = (d, { peerId }) => { if (peerId === NET.hostId && Array.isArray(d.order)) beginOnlineRace(d.order, d.track === 'A' ? 'A' : 'B'); };
   st.onMessage = (d, { peerId }) => { const o = RACE.opps.find(o => o.id === peerId); if (o && d) remoteRecv(o, d); };
   $('olHome').classList.add('hidden'); $('olRoom').classList.remove('hidden');
   history.replaceState(null, '', `${location.pathname}?room=${code}`);
@@ -3004,6 +2995,7 @@ function refreshOlColors() {
 }
 function renderPlayers() {
   if (!NET.code) return;
+  document.querySelectorAll('#olTrack button').forEach(b => { b.classList.toggle('on', b.dataset.t === NET.track); b.disabled = !NET.host; });
   refreshOlColors();
   $('olRoomName').textContent = NET.name || `방 ${NET.code}`;
   $('olCode').textContent = NET.code;
@@ -3011,11 +3003,11 @@ function renderPlayers() {
   $('olPlayers').innerHTML = list.map(p => `<li><i style="background:${p.color}"></i>${esc(p.nick)}${p.host ? ' <em>방장</em>' : ''}</li>`).join('');
   $('olStart').classList.toggle('hidden', !NET.host);
 }
-function beginOnlineRace(order) {
+function beginOnlineRace(order, track) {
   NET.started = true; announce();
   RACE.on = true; RACE.online = true; RACE.order = order;
   $('online').classList.add('hidden');
-  if (T.id !== 'B') selectTrack('B');
+  if (T.id !== track) selectTrack(track); else if (track === 'A') buildWorld();   // 짐카나는 참가자 수만큼 코스를 다시 깖
   startGame();
 }
 // 내 상태를 초당 약 15번 보냄
@@ -3025,127 +3017,20 @@ function netSend(now) {
   NET.act.st.send({ t:Math.round(now), x:+V.x.toFixed(2), z:+V.z.toFixed(2), h:+V.h.toFixed(3), v:+Math.max(0, V.vx).toFixed(1), p:+RACE.p.toFixed(1), fin:RACE.fin });
 }
 
-// ---------- 짐카나 토너먼트: 같은 코스 두 개(코스1 | 배리어 | 코스2)에서 1:1로 동시에 출발, 8명이 8강 → 4강 → 결승 ----------
-// 대회 규정(제11조) 반영: 파일런 1개당 +1초, 기록 = 주행 시간 + 벌칙, 점수 = 150 × ((1.45·Tmin/T) − 1) / 0.45 + 100 (Tmin의 145% 초과는 100점)
-const TWIN_DX = 77;                                                     // 코스2를 오른쪽으로 옮긴 거리 (두 배리어 사이 약 3m)
-const ROUND_NAMES = ['8강', '4강', '결승'];
-const TOUR = { on:false, active:false, round:0, rounds:[], res:[], opp:null, clock:0, ready:false, out:false, champ:false, aiCache:{} };
-const penaltyPer = () => TOUR.on ? 1 : CONE_PENALTY;
+// ---------- 온라인 짐카나: 대회처럼 같은 코스를 사람 수만큼 나란히 (코스1 | 배리어 | 코스2 …) ----------
+// 각자 자기 화면에서는 늘 자기 코스를 달리고, 다른 사람 차는 옆 코스에 그려짐. 대회 규정(제11조): 파일런 1개당 +1초,
+// 점수 = 150 × ((1.45·Tmin/T) − 1) / 0.45 + 100 (Tmin의 145% 초과는 100점)
+const TWIN_DX = 77;                                                     // 옆 코스까지 거리 (두 배리어 사이 약 3m)
+const penaltyPer = () => RACE.online && !T.street ? 1 : CONE_PENALTY;
 const gymPoints = (t, tmin) => t > 1.45 * tmin ? 100 : 150 * ((1.45 * tmin / t) - 1) / .45 + 100;
-// AI 한 번 주행(출발선 → 도착선) 시간: 화면 속 AI와 같은 속도표·가속 한계로 미리 계산
-function aiRunTime(skill) {
-  const key = skill.toFixed(3); if (TOUR.aiCache[key]) return TOUR.aiCache[key];
-  let p = -4, v = 0, t = 0, t0 = 0; const len = T.len, dt = 1 / 60;
-  while (p < len && t < 300) {
-    v += clamp(T.vprof[idxAt(clamp(p, 0, len - .01))] * skill - v, -11 * dt, 7 * dt * Math.max(.15, 1 - v / 36));
-    const p0 = p; p += v * dt; t += dt; if (p0 < 0 && p >= 0) t0 = t;
-  }
-  return (TOUR.aiCache[key] = t - t0);
-}
-function newTournament() {
-  const cols = LIVERIES.map(l => l[1]).filter(c => c.toLowerCase() !== SET.color.toLowerCase());
-  const ai = AI_NAMES.map((name, i) => ({ name, color:cols[i % cols.length], skill:[.95, .92, .89, .86, .82, .78, .72][i] }));
-  const me = { name:SET.nick || 'YOU', color:SET.color, me:true };
-  // 1경기는 나 vs 가장 약한 상대, 나머지는 강-약 짝 (이기고 올라갈수록 상대가 강해짐)
-  Object.assign(TOUR, { active:true, round:0, rounds:[[me, ai[6], ai[2], ai[3], ai[1], ai[4], ai[0], ai[5]]], res:[], out:false, champ:false, ready:false, best:null });
-}
-// 내가 없는 경기는 실력값으로 기록을 계산 (약간의 실수와 파일런 벌칙 포함)
-function simRun(e) {
-  const pen = Math.random() < (1.05 - e.skill) * 2.2 ? 1 + (Math.random() < .3 ? 1 : 0) : 0;
-  return { t:aiRunTime(e.skill) * (1 + rand(-.005, .03)), pen, dnf:false };
-}
-const runTotal = r => r.dnf ? Infinity : r.t + r.pen;
-function myMatch() { const L = TOUR.rounds[TOUR.round], i = L.findIndex(e => e.me); return i < 0 ? null : { i:i >> 1, a:L[i & ~1], b:L[(i & ~1) + 1], opp:L[i ^ 1] }; }
-// 경기 준비: 코스2 출발선 뒤에 상대 차를 놓음
-function setupTourMatch() {
-  clearTourOpp();
-  const m = myMatch(); if (!m) return;
-  const e = m.opp, g = bakeCar(e.color); g.add(nameTag(e.name, e.color)); scene.add(g);
-  const r = simRun(e);
-  TOUR.opp = { ...e, g, p:-4, v:0, fin:null, pen:r.pen, tStart:null, x:0, z:0, h:Math.PI };
-  TOUR.clock = 0; placeTourOpp();
-}
-function clearTourOpp() { if (TOUR.opp) scene.remove(TOUR.opp.g); TOUR.opp = null; }
-function placeTourOpp() {
-  const o = TOUR.opp, len = T.len;
-  if (o.p < 0) { const s = T.SAMP[0], n = T.SAMP[1], d = Math.hypot(n[0] - s[0], n[1] - s[1]) || 1; o.x = s[0] - (n[0] - s[0]) / d * -o.p; o.z = s[1] - (n[1] - s[1]) / d * -o.p; o.h = Math.atan2(n[0] - s[0], n[1] - s[1]); }
-  else { const q = posAt(Math.min(o.p, len - .01), 0); o.x = q.x; o.z = q.z; o.h = q.h; }
-  o.x += TWIN_DX;
-  o.g.position.set(o.x, 0, o.z); o.g.rotation.y = o.h;
-}
-// 1/120초마다: 출발 신호가 꺼지면 상대가 코스2를 달림
-function tourStep(dt) {
-  const o = TOUR.opp; if (!o || S.count > 0) return;
-  TOUR.clock += dt;
-  if (o.fin != null) { o.v = Math.max(0, o.v - 12 * dt); if (o.p < T.len + 8) o.p += o.v * dt; return; }
-  o.v += clamp(T.vprof[idxAt(clamp(o.p, 0, T.len - .01))] * o.skill - o.v, -11 * dt, 7 * dt * Math.max(.15, 1 - o.v / 36));
-  const p0 = o.p; o.p += o.v * dt;
-  if (p0 < 0 && o.p >= 0) o.tStart = TOUR.clock;
-  if (o.p >= T.len) o.fin = TOUR.clock - o.tStart;
-}
-function tourVisuals(now) {
-  const o = TOUR.opp; if (!o) return;
-  if (o.p < T.len) placeTourOpp();
-  else { o.g.position.set(o.x, 0, o.z); }
-  if (now - (TOUR.hudAt || 0) < 150) return;
-  TOUR.hudAt = now;
-  const m = myMatch();
-  hud.lap.textContent = `${ROUND_NAMES[TOUR.round]} · ${m ? m.i + 1 : ''}경기`;
-  const myT = S.done ? (S.dnf ? 'DNF' : fmt(eff())) : S.running ? fmt(S.t) : '출발 전';
-  const opT = o.fin != null ? fmt(o.fin + o.pen) + (o.pen ? ` (+${o.pen})` : '') : o.tStart != null ? fmt(TOUR.clock - o.tStart) : '출발 전';
-  $('standings').innerHTML = `<li class="me"><b>1</b><i style="background:${SET.color}"></i><span>${esc(SET.nick || 'YOU')} · 코스1</span><em>${myT}</em></li>`
-    + `<li><b>2</b><i style="background:${o.color}"></i><span>${esc(o.name)} · 코스2</span><em>${opT}</em></li>`;
-}
-// 내 경기가 끝나면: 승패 결정, 같은 라운드의 다른 경기 계산, 다음 라운드 대진 만들기
-function tourFinish(dnf) {
-  const m = myMatch(), o = TOUR.opp, L = TOUR.rounds[TOUR.round];
-  const mine = { t:S.t, pen:S.pen, dnf }, theirs = { t:o.fin != null ? o.fin : aiRunTime(o.skill), pen:o.pen, dnf:false };
-  const res = [];
-  for (let i = 0; i < L.length / 2; i++) {
-    const a = L[2 * i], b = L[2 * i + 1];
-    const ra = a.me ? mine : b.me ? theirs : simRun(a), rb = b.me ? mine : a.me ? theirs : simRun(b);
-    res.push({ a, b, ra, rb, win:runTotal(ra) <= runTotal(rb) ? a : b });
-  }
-  TOUR.res[TOUR.round] = res;
-  const won = res[m.i].win.me, played = TOUR.round;
-  if (!dnf) TOUR.best = Math.min(TOUR.best ?? Infinity, runTotal(mine));
-  if (!won) TOUR.out = true;
-  else if (TOUR.round === 2) TOUR.champ = true;
-  else { TOUR.rounds[TOUR.round + 1] = res.map(r => r.win); TOUR.round++; }
-  // 규정 점수: 지금까지 나온 모든 기록 중 가장 빠른 기록이 Tmin
-  const all = TOUR.res.flat().flatMap(r => [r.ra, r.rb]).filter(r => !r.dnf).map(runTotal), tmin = Math.min(...all);
-  return { won, played, mine, theirs, tmin, pts:dnf ? 0 : gymPoints(runTotal(mine), tmin) };
-}
-// 대진표 창
-function openBracket() {
-  const box = $('tourBody');
-  const label = r => r.dnf ? 'DNF' : fmt(runTotal(r)) + (r.pen ? `<small> +${r.pen}</small>` : '');
-  box.innerHTML = [0, 1, 2].map(r => {
-    const L = TOUR.rounds[r];
-    const rows = [];
-    for (let i = 0; i < (8 >> r) / 2; i++) {
-      const res = TOUR.res[r] && TOUR.res[r][i], a = L && L[2 * i], b = L && L[2 * i + 1];
-      const nm = (e, rr) => e ? `<div class="${e.me ? 'me' : ''} ${res && res.win === e ? 'win' : res ? 'lose' : ''}"><i style="background:${e.color}"></i>${esc(e.name)}<em>${res ? label(rr) : ''}</em></div>` : '<div class="tbd">-</div>';
-      rows.push(`<div class="mt">${nm(a, res && res.ra)}${nm(b, res && res.rb)}</div>`);
-    }
-    return `<div class="rcol"><h4>${ROUND_NAMES[r]}</h4>${rows.join('')}</div>`;
-  }).join('');
-  const m = !TOUR.out && !TOUR.champ ? myMatch() : null;
-  $('tourMsg').textContent = TOUR.champ ? '🏆 우승! 결승까지 모두 이겼어요.' : TOUR.out ? `탈락 · ${ROUND_NAMES[TOUR.round]}에서 졌어요.` :
-    `다음: ${ROUND_NAMES[TOUR.round]} ${m.i + 1}경기 · 상대 ${m.opp.name} (코스2)`;
-  $('tourGo').textContent = TOUR.champ || TOUR.out ? '새 토너먼트' : `${ROUND_NAMES[TOUR.round]} 경기 시작 ▶`;
-  $('tour').classList.remove('hidden');
-}
 
 // ---------- 메뉴 · 화면 전환 ----------
 function startGame() {
   audioInit();
   if (!RACE.online && SET.mode === 'online') { openOnline(); return; }
   RACE.on = RACE.online || SET.mode === 'race';
-  TOUR.on = !RACE.online && SET.mode === 'tour';
-  if (TOUR.on) { if (T.id !== 'A') selectTrack('A'); if (!TOUR.active) newTournament(); if (!TOUR.ready) { openBracket(); return; } TOUR.ready = false; $('tour').classList.add('hidden'); }
-  if (RACE.on && !TRACKS[T.id].street) selectTrack('B');
-  if (TOUR.on && T.dxs.length < 2) buildWorld();
+  if (RACE.on && !RACE.online && !TRACKS[T.id].street) selectTrack('B');   // AI 레이스는 모나코. 온라인은 방장이 고른 트랙
+  if (!RACE.online && T.dxs.length > 1) buildWorld();          // 온라인 짐카나 뒤 혼자 달릴 때는 코스 한 개로
   $('menu').classList.add('hidden'); $('hud').classList.remove('hidden');
   S.mode = 'play'; camera.clearViewOffset();
   scene.add(car.g); M.body.envMapIntensity = .55;
@@ -3159,7 +3044,7 @@ function toMenu() {
   garage.add(car.g); M.body.envMapIntensity = 1; ghostCar.g.visible = false;
   for (const k in input) input[k] = false;
   Object.assign(V, STILL); E.rpm = IDLE;
-  clearOpps(); clearTourOpp(); TOUR.on = false; $('standings').classList.add('hidden');
+  clearOpps(); $('standings').classList.add('hidden');
   if (RACE.online) { RACE.online = false; NET.started = false; announce(); openOnline(); }
   RACE.on = false;
   refreshMenu(); setMusic();
@@ -3173,9 +3058,9 @@ function selectTrack(id) {
   refreshMenu();
 }
 function refreshMenu() {
-  document.querySelectorAll('.trk').forEach(b => { b.classList.toggle('on', b.dataset.t === T.id); b.classList.toggle('off', (SET.mode === 'race' || SET.mode === 'online') && b.dataset.t === 'A' || SET.mode === 'tour' && b.dataset.t === 'B'); });
+  document.querySelectorAll('.trk').forEach(b => { b.classList.toggle('on', b.dataset.t === T.id); b.classList.toggle('off', SET.mode === 'race' && b.dataset.t === 'A'); });
   document.querySelectorAll('#modeSeg button').forEach(b => b.classList.toggle('on', b.dataset.m === SET.mode));
-  $('goBtn').textContent = SET.mode === 'online' ? '온라인 방 ▶' : SET.mode === 'race' ? 'RACE START ▶' : SET.mode === 'tour' ? '토너먼트 ▶' : 'START ▶';
+  $('goBtn').textContent = SET.mode === 'online' ? '온라인 방 ▶' : SET.mode === 'race' ? 'RACE START ▶' : 'START ▶';
   $('nickIn').value = SET.nick;
   ['A', 'B'].forEach(id => {
     const g = store.get(GHOST_KEY(id), null), bl = store.get(LAP_KEY(id), null);
@@ -3322,18 +3207,13 @@ $('resetBtn').onclick = () => { if (S.mode === 'play') reset(); };
 $('menuBtn').onclick = toMenu;
 $('backBtn').onclick = respawn;
 $('goBtn').onclick = startGame;
-$('againBtn').onclick = () => RACE.online ? toMenu() : TOUR.on ? openBracket() : startGame();
-$('tourGo').onclick = () => {
-  if (TOUR.champ || TOUR.out) { newTournament(); openBracket(); return; }
-  TOUR.ready = true; startGame();
-};
-$('tourMenu').onclick = () => { $('tour').classList.add('hidden'); toMenu(); };
+$('againBtn').onclick = () => RACE.online ? toMenu() : startGame();
+
 $('toMenuBtn').onclick = toMenu;
 document.querySelectorAll('#modeSeg button').forEach(b => b.onclick = () => {
-  const was = SET.mode; SET.mode = b.dataset.m; saveSet();
-  if ((SET.mode === 'race' || SET.mode === 'online') && T.id !== 'B') selectTrack('B');
-  if (SET.mode === 'tour' && T.id !== 'A') selectTrack('A');
-  else if (T.id === 'A' && (was === 'tour') !== (SET.mode === 'tour')) buildWorld();   // 코스 한 개 ↔ 두 개
+  SET.mode = b.dataset.m; saveSet();
+  if (SET.mode === 'race' && T.id !== 'B') selectTrack('B');
+  if (SET.mode === 'online') NET.track = T.id;
   refreshMenu();
 });
 $('nickIn').addEventListener('input', e => { SET.nick = e.target.value.trim().slice(0, 12) || 'PLAYER'; saveSet(); });
@@ -3346,9 +3226,14 @@ $('olRefresh').onclick = renderRooms;
 $('olStart').onclick = () => {
   if (!NET.host || !NET.act) return;
   const order = [NET.self, ...Object.keys(NET.peers)];
-  NET.act.go.send({ order }); beginOnlineRace(order);
+  NET.act.go.send({ order, track:NET.track }); beginOnlineRace(order, NET.track);
 };
 $('olLeave').onclick = () => leaveGame(false);
+document.querySelectorAll('#olTrack button').forEach(b => b.onclick = () => {
+  if (!NET.host) return;
+  NET.track = b.dataset.t; renderPlayers(); announce();
+  if (NET.act) NET.act.hi.send(NET.me());                             // 바뀐 트랙을 참가자에게 알림
+});
 $('olClose').onclick = () => $('online').classList.add('hidden');
 $('olCopy').onclick = () => {
   const url = `${location.origin}${location.pathname}?room=${NET.code}`;
@@ -3369,7 +3254,7 @@ addEventListener('resize', () => {
 
 if (new URLSearchParams(location.search).has('debug')) window.G = { V, S, E, input, step, reset, respawn, H, selectTrack, startGame, toMenu, applyNight, gate,
   get T() { return T; }, get CR() { return CR; }, get ghost() { return ghost; },
-  camera, car, renderer, freeCam:false, TOUR, aiRunTime, newTournament, backfire, RACE, NET, openOnline, joinGame, AU, remoteRecv, remoteInterp,
+  camera, car, renderer, freeCam:false, backfire, RACE, NET, openOnline, joinGame, AU, remoteRecv, remoteInterp,
   render(ms = 16) { const now = performance.now(); if (S.mode === 'play') { updateEngine(ms / 1000); updateCrowd(ms / 1000, now); updateVisuals(ms / 1000, now); updateBackfire(ms / 1000, now); draw(scene); }
     else { updateGarageCam(ms / 1000, now); draw(garage); }
     audioUpdate(ms / 1000); return AU.ctx ? AU.ctx.state : 'no-audio'; } };
